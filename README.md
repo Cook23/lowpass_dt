@@ -77,9 +77,10 @@ alpha = dt / (tau + dt)
 y = y + alpha * (x - y)
 ```
 
-No sample-rate dependency.
-No overshoot. No instability.  
-Act as a real 1st order low-pass filter
+- No sample-rate dependency.
+- No overshoot. No instability.  
+- Act as a real 1st order low-pass filter
+
 ---
 
 ### ✔ Silence detection
@@ -92,7 +93,7 @@ dt_silence = mean(dt) + 3σ
 
 - Mimics the real behavior of a sensor scanned at a constant rate.
 - Synthetic updates are injected with last real known value until filter converges smoothly.
-- Last value at sensor output is always last value received by sensor before it was silent.
+- Last value at filter output is always last value received from sensor before it was silent.
 
 No frozen fake values.
 
@@ -121,7 +122,9 @@ deadband = k × sigma(filtered_signal)
 
 ---
 
-### ✔ Batch Configuration Example
+## ⚙ Configuration
+
+### ⚙ Batch Configuration Example
 
 You can apply it to many sensors as batch:
 
@@ -135,7 +138,7 @@ No per-sensor tuning required. Parameters auto-adapt.
 Even "tau" is not really needed. The default value 60 sec is generally fine.
 
 
-## ⚙ Explicit Configuration Example
+### ⚙ Explicit Configuration Example
 
 Or you can apply it to each sensors:
 
