@@ -1,7 +1,7 @@
 {
   "domain": "lowpass_dt",
   "name": "Low-pass dt filter",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "config_flow": false,
   "requirements": [],
   "codeowners": ["@Cook23"],
