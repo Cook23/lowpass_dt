@@ -1,7 +1,0 @@
-{
-  "name": "Lowpass DT",
-  "content_in_root": false,
-  "domains": ["sensor"],
-  "country": "FR",
-  "render_readme": true
-}
