@@ -168,19 +168,17 @@ Except "source" parameters are not needed. Defaults values are generally fine.
 
 ### Explicit mode
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  source              string      required            Source sensor entity_id
-  tau                 float       60.0                Low-pass time constant in seconds
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+| source | string | required | Source sensor entity_id |
+| tau | float | 60.0 | Low-pass tau time constant in seconds |
 
 ### Pattern Mode
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  match               string      required            Source sensor match string
-  tau                 float       60.0                Low-pass time constant in seconds
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+| match | string | required | Source sensor match string |
+| tau | float | 60.0 | Low-pass tau time constant in seconds |
 
 A match string should avoid matching already filtered entities.
 A prefix is added to the filtered entity_id to prevent this.
@@ -190,42 +188,38 @@ To prevent misconfiguration from creating thousands of entities, creation is lim
 
 ### Naming
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  prefix              string      "lp\_"              Prefix for generated entity_id
-  suffix              string      "(Filtered)"        Suffix added to friendly name
-  name                string      None                Explicit friendly name (disables prefix/suffix)
-  unique_id           string      auto-generated      Optional unique_id seed (explicit sensors only)
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+| prefix | string | "lp\_" | Prefix for generated entity_id |
+| suffix | string | "(Filtered)" | Suffix added to friendly name |
+| name | string | None | Explicit friendly name (disables prefix/suffix) |
+| unique_id | string | auto-generated | Optional unique_id seed (explicit sensors only) |
 
 
 ### Fixed Deadband Mode
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  deadband            float       None                deadband to limit output rate
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+| deadband | float | None | deadband to limit output rate |
 
 ### Adaptive Deadband Mode
 
 Adaptive deadband (default when deadband is not set):
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  deadband_tau_sigma  float       max(100 × tau, 10)  deadband is estimated on this period
-  deadband_k_sigma    float       2.0                 deadband is estimated inside this deviation
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+| deadband_tau_sigma | float | max(100 × tau, 10) | deadband is estimated on this period |
+| deadband_k_sigma | float | 2.0 | deadband is estimated inside this deviation |
 
 Effective deadband = k × sigma(filtered_signal)
 
 
 ### Rate Control
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  min_rate_dt         float       3600                Maximum interval between publishes (seconds)
-  max_rate_dt         float       10                  Minimum interval between publishes (rate limiter)
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+| min_rate_dt | float | 3600 | Maximum interval between publishes (seconds) |
+| max_rate_dt | float | 10 | Minimum interval between publishes (rate limiter) |
 
 min_rate_dt prevents very long periods with no states recorded in the Recorder.
 It can improve history graphs and cards.
@@ -236,10 +230,9 @@ It should almost never be reached, except in case of misconfiguration
 
 ### Rounding
 
-  ---------------------------------------------------------------------------------------
-  Parameter           Type        Default             Description
-  ------------------- ----------- ------------------- -----------------------------------
-  round               int         auto-derived        Avoid non-significant digit
+| Parameter | Type | Default | Description |
+|----------|-----------|----------|-----------|
+|  round | int | auto-derived | Avoid non-significant digit |
 
 ---
 
