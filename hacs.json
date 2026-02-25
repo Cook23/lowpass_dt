@@ -1,7 +1,6 @@
 {
   "name": "Lowpass DT",
   "content_in_root": false,
-  "domains": ["sensor"],
-  "country": "FR",
+  "domains": ["integration"],
   "render_readme": true
 }
