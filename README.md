@@ -158,6 +158,7 @@ patterns:
 No per-sensor tuning required because parameters auto-adapt.
 Even "tau" is not really needed. The default value 60 sec is generally fine.
 
+---
 
 ### ⚙ How to Fine-Tune Parameters Beyond Default Values
 
