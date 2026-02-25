@@ -124,23 +124,9 @@ deadband = k × sigma(filtered_signal)
 
 ## ⚙ Configuration
 
-### ⚙ Batch Configuration Example
-
-You can apply it to many sensors as batch:
-
-```yaml
-patterns:
-  - match: "sensor.temperature_*"
-    tau: 60
-```
-
-No per-sensor tuning required. Parameters auto-adapt.
-Even "tau" is not really needed. The default value 60 sec is generally fine.
-
-
 ### ⚙ Explicit Configuration Example
 
-Or you can apply it to each sensors:
+You can setup each sensors:
 
 ```yaml
 lowpass_dt:
@@ -155,6 +141,63 @@ lowpass_dt:
 ```
 
 Except "source" parameters are not needed. Defaults values are generally fine.
+Even "tau" is not really needed. The default value 60 sec is generally fine.
+
+---
+
+### ⚙ Batch Configuration Example
+
+Or you can setup many sensors as batch:
+
+```yaml
+patterns:
+  - match: "sensor.temperature_*"
+    tau: 60
+```
+
+No per-sensor tuning required because parameters auto-adapt.
+Even "tau" is not really needed. The default value 60 sec is generally fine.
+
+
+### ⚙ How to Fine-Tune Parameters Beyond Default Values
+
+- Disable the deadband by setting deadband: 0
+- Plot historical curves for:
+  - the source measurement
+  - the filtered measurement
+- Adjust tau to filter out unwanted noise while preserving meaningful variations
+- Then you have two options:
+  - define a fixed deadband value
+  - or return to automatic deadband mode
+
+- If you choose automatic deadband:
+  - Remove the deadband parameter
+  - Wait approximately 300 × tau for stabilization
+    - if tau = 1 minute, wait at least 5 hours
+    - if tau = 1 hour, wait at least 15 days
+  - If needed, adjust deadband_k_sigma:
+  - Increase it to make the filter less sensitive
+  - Decrease it to make the filter more sensitive
+
+
+### ❗ Deadband Formula
+
+The implementation uses an integral deadband formula:
+
+```
+e = y - y_last_published
+i = i + (e * dt) / tau   (only if |e| < D)
+Publish if |e| >= D OR |i| >= D
+```
+
+This means that a small variation, smaller than the deadband threshold, will still be recorded if it persists long enough.
+
+The time constant of this integral action is the same as the main low-pass filter tau.
+
+
+### ❗ Fine-Tuning in Explicit or Batch Configuration Mode
+
+Fine-Tuning is possible in Explicit or Batch mode. In batch mode the parameters are used for all sensors of a batch so, of course, they should be similar.
 
 ---
 
