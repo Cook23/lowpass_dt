@@ -27,7 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
-# Helpers (pure refactor — no behavior change)
+# Helpers (pure refactor ï¿½ no behavior change)
 # ------------------------------------------------------------
 
 def _validate_pattern_item(p: dict) -> str | None:
@@ -115,73 +115,115 @@ async def async_setup_entry_loader(
         )
 
     # ------------------------------------------------------------
-    # Initial pattern matching
+    # Create explicit entities immediately (boot-safe)
     # ------------------------------------------------------------
-    matched_cfgs: dict[str, LowpassCfg] = {}
 
-    all_sensor_entities = [
-        st.entity_id for st in hass.states.async_all("sensor")
+    explicit_meta: dict[str, CfgMeta] = {}
+    desired_unique_ids: set[str] = set()  # unique_id reference set
+
+    for cfg in explicit.values():
+        meta = make_meta(hass, cfg, is_pattern=False)
+        explicit_meta[cfg.source] = meta
+        desired_unique_ids.add(meta.unique_id)
+
+    explicit_entities = [
+        sensor_cls(
+            hass,
+            cfg,
+            is_pattern=False,
+            precomputed=explicit_meta[cfg.source],
+        )
+        for cfg in explicit.values()
     ]
 
-    for p in patterns_list:
-        pat = _validate_pattern_item(p)
-        if not pat:
-            continue
+    async_add_entities(explicit_entities)
 
-        local_count = 0
-
-        for eid in all_sensor_entities:
-
-            if eid in explicit:
-                continue
-
-            if not fnmatch.fnmatch(eid, pat):
-                continue
-
-            # Recursion protection
-            if eid in own_entity_ids:
-                _LOGGER.warning(
-                    "LP patterns[]: match '%s' includes '%s' (lowpass_dt sensor). Skipped to avoid recursion.",
-                    pat,
-                    eid,
-                )
-                continue
-
-            local_count += 1
-
-            if local_count > MAX_PATTERN_ENTITIES:
-                _LOGGER.warning(
-                    "LP patterns[]: pattern '%s' exceeded limit (%d). Aborted for this pattern.",
-                    pat,
-                    MAX_PATTERN_ENTITIES,
-                )
-                break
-
-            matched_cfgs[eid] = build_cfg(
-                p,
-                source=eid,
-                allow_unique_id=False,
-            )
+    for ent in explicit_entities:
+        own_entity_ids.add(ent.entity_id)
+        suggested = getattr(ent, "_attr_suggested_object_id", None)
+        if suggested:
+            own_entity_ids.add(f"sensor.{suggested}")
 
     # ------------------------------------------------------------
-    # Precompute meta
+    # Initial pattern matching (executed after HA fully started)
     # ------------------------------------------------------------
-    cfgs = list(explicit.values()) + list(matched_cfgs.values())
 
-    cfg_meta: dict[str, CfgMeta] = {}
-    desired_unique_ids: set[str] = set()
-
-    for cfg in cfgs:
-        is_pattern = cfg.source in matched_cfgs
-        meta = make_meta(hass, cfg, is_pattern=is_pattern)
-        desired_unique_ids.add(meta.unique_id)
-        cfg_meta[cfg.source] = meta
-
-    # ------------------------------------------------------------
-    # Cleanup (pattern mode only)
-    # ------------------------------------------------------------
     @callback
-    def _cleanup_late(_event):
+    def _full_rescan_after_start(_event):
+
+        matched_cfgs: dict[str, LowpassCfg] = {}
+
+        # Scan runtime states only (never registry)
+        all_sensor_entities = [
+            st.entity_id for st in hass.states.async_all("sensor")
+        ]
+
+        for p in patterns_list:
+            pat = _validate_pattern_item(p)
+            if not pat:
+                continue
+
+            local_count = 0
+
+            for eid in all_sensor_entities:
+
+                if eid in explicit:
+                    continue
+
+                st = hass.states.get(eid)
+                if not st:
+                    continue
+
+                if st.state in (None, "unknown", "unavailable"):
+                    continue
+
+                if not fnmatch.fnmatch(eid, pat):
+                    continue
+
+                # Recursion protection (entity_id only)
+                if eid in own_entity_ids:
+                    _LOGGER.warning(
+                        "LP patterns[]: match '%s' includes '%s' (lowpass_dt sensor). Skipped to avoid recursion.",
+                        pat,
+                        eid,
+                    )
+                    continue
+
+                local_count += 1
+
+                if local_count > MAX_PATTERN_ENTITIES:
+                    _LOGGER.warning(
+                        "LP patterns[]: pattern '%s' exceeded limit (%d). Aborted for this pattern.",
+                        pat,
+                        MAX_PATTERN_ENTITIES,
+                    )
+                    break
+
+                matched_cfgs[eid] = build_cfg(
+                    p,
+                    source=eid,
+                    allow_unique_id=False,
+                )
+
+        # ------------------------------------------------------------
+        # Precompute meta
+        # ------------------------------------------------------------
+
+        cfgs = list(explicit.values()) + list(matched_cfgs.values())
+
+        cfg_meta: dict[str, CfgMeta] = {}
+        desired_unique_ids.clear()
+
+        for cfg in cfgs:
+            is_pattern = cfg.source in matched_cfgs
+            meta = make_meta(hass, cfg, is_pattern=is_pattern)
+            cfg_meta[cfg.source] = meta
+            desired_unique_ids.add(meta.unique_id)
+
+        # ------------------------------------------------------------
+        # Cleanup (pattern mode only)
+        # ------------------------------------------------------------
+
         reg2 = er.async_get(hass)
         removed = 0
 
@@ -191,43 +233,49 @@ async def async_setup_entry_loader(
             if entity.platform != DOMAIN:
                 continue
             if entity.unique_id not in desired_unique_ids:
+                _LOGGER.warning(
+                    "LP CLEANUP removing entity_id=%s unique_id=%s",
+                    entity.entity_id,
+                    entity.unique_id,
+                )
                 reg2.async_remove(entity.entity_id)
                 removed += 1
 
-        _LOGGER.debug("LP cleanup late: removed=%d", removed)
+        _LOGGER.warning("LP cleanup late: removed=%d", removed)
+
+        # ------------------------------------------------------------
+        # Create entities
+        # ------------------------------------------------------------
+
+        entities = [
+            sensor_cls(
+                hass,
+                cfg,
+                is_pattern=cfg_meta[cfg.source].is_pattern,
+                precomputed=cfg_meta[cfg.source],
+            )
+            for cfg in matched_cfgs.values()
+        ]
+
+        async_add_entities(entities)
+
+        for ent in entities:
+            own_entity_ids.add(ent.entity_id)
+            suggested = getattr(ent, "_attr_suggested_object_id", None)
+            if suggested:
+                own_entity_ids.add(f"sensor.{suggested}")
 
     if patterns_list:
-        unsub_cleanup = hass.bus.async_listen_once(
+        unsub = hass.bus.async_listen_once(
             "homeassistant_started",
-            _cleanup_late,
+            _full_rescan_after_start,
         )
-        entry.async_on_unload(unsub_cleanup)
-
-    # ------------------------------------------------------------
-    # Create entities
-    # ------------------------------------------------------------
-    entities = [
-        sensor_cls(
-            hass,
-            cfg,
-            is_pattern=cfg_meta[cfg.source].is_pattern,
-            precomputed=cfg_meta[cfg.source],
-        )
-        for cfg in cfgs
-    ]
-
-    async_add_entities(entities)
-
-    # Update recursion guard
-    for ent in entities:
-        own_entity_ids.add(ent.entity_id)
-        suggested = getattr(ent, "_attr_suggested_object_id", None)
-        if suggested:
-            own_entity_ids.add(f"sensor.{suggested}")
+        entry.async_on_unload(unsub)
 
     # ------------------------------------------------------------
     # Dynamic pattern matching
     # ------------------------------------------------------------
+
     pattern_dynamic_created: set[str] = set()
 
     @callback
@@ -238,6 +286,13 @@ async def async_setup_entry_loader(
 
         new_eid = event.data.get("entity_id")
         if not new_eid:
+            return
+
+        st = hass.states.get(new_eid)
+        if not st:
+            return
+
+        if st.state in (None, "unknown", "unavailable"):
             return
 
         if new_eid in explicit:
@@ -252,16 +307,7 @@ async def async_setup_entry_loader(
             if not fnmatch.fnmatch(new_eid, pat):
                 continue
 
-            st = hass.states.get(new_eid)
-            if not st:
-                return
-
             if new_eid in own_entity_ids:
-                _LOGGER.warning(
-                    "LP dynamic: match '%s' includes '%s' (lowpass_dt sensor). Skipped to avoid recursion.",
-                    pat,
-                    new_eid,
-                )
                 return
 
             cfg = build_cfg(
@@ -269,8 +315,10 @@ async def async_setup_entry_loader(
                 source=new_eid,
                 allow_unique_id=False,
             )
+
             meta = make_meta(hass, cfg, is_pattern=True)
 
+            # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:
                 return
 

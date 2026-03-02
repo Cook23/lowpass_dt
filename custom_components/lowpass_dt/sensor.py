@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
@@ -42,6 +43,20 @@ async def async_setup_entry(
         sensor_cls=LowpassDtSensor,
     )
 
+# ------------------------------------------------------------
+# Extra-data
+# ------------------------------------------------------------
+class LowpassExtraData(ExtraStoredData):
+
+    def __init__(self, data: dict):
+        self._data = data
+
+    def as_dict(self) -> dict:
+        return self._data
+
+    @classmethod
+    def from_dict(cls, data: dict):
+        return cls(data)
 
 # ------------------------------------------------------------
 # Low-pass sensor entity with tau injection and HA-native restore
@@ -140,44 +155,120 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             object_id = f"{cfg.prefix}{object_id_src}"
 
         self._attr_suggested_object_id = object_id
-        self._attr_entity_id = f"sensor.{object_id}"
 
         # ------------------------------------------------------------
         # FRIENDLY NAME
         # ------------------------------------------------------------
         self._attr_name = name_final
         self._use_name_mode = use_name
+        
+        # ------------------------------------------------------------
+        # ATTRIBUTES
+        # ------------------------------------------------------------
 
-    # ------------------------------------------------------------
-    # FIX: restore registry rename hook
-    # ------------------------------------------------------------
-    @callback
-    def async_registry_entry_updated(self) -> None:
-        reg = er.async_get(self.hass)
-        entry = reg.async_get(self.entity_id)
-        if entry is None:
-            return
+        self._attr_native_unit_of_measurement = None
+        self._attr_state_class = None
+        self._attr_device_class = None
+        self._attr_native_value = None
 
-        desired = f"sensor.{self._attr_suggested_object_id}"
-        if entry.entity_id != desired:
-            try:
-                reg.async_update_entity(
-                    entry.entity_id,
-                    new_entity_id=desired,
-                )
-            except Exception:
-                pass
 
     async def async_added_to_hass(self) -> None:
         """Restore internal state and register listeners."""
 
         # ------------------------------------------------------------
-        # NEW HA-native restore (extra_restore_data)
+        # NEW HA-native restore
         # ------------------------------------------------------------
+
         await super().async_added_to_hass()
+
+        # ------------------------------------------------------------
+        # Restore extra_data
+        # ------------------------------------------------------------
         data = await self.async_get_last_extra_data()
+
         if data:
-            self._restore_internal_state(data)
+            self._restore_internal_state(data.as_dict())
+        else:
+            _LOGGER.warning(
+                "Lowpass: context lost or new entity for %s (empty filter state).",
+                self.entity_id,
+            )
+
+        # ------------------------------------------------------------
+        # Rename via registry (deferred, safe)
+        # ------------------------------------------------------------
+        async def _deferred_rename():
+            registry = er.async_get(self.hass)
+            entry = registry.async_get(self.entity_id)
+
+            if entry:
+                desired_entity_id = f"sensor.{self._attr_suggested_object_id}"
+
+                if entry.entity_id != desired_entity_id:
+                    registry.async_update_entity(
+                        entry.entity_id,
+                        new_entity_id=desired_entity_id,
+                    )
+
+        self.hass.async_create_task(_deferred_rename())
+
+
+        # ------------------------------------------------------------
+        # Restore last visible state (robust + immediate write)
+        # ------------------------------------------------------------
+        last_state = await self.async_get_last_state()
+        src = self.hass.states.get(self.cfg.source)
+
+        restore_attrs = last_state.attributes if last_state else {}
+
+        # Source may be unknown/unavailable but attributes can still exist
+        source_attrs = {}
+        if src is not None and isinstance(src.attributes, dict):
+            source_attrs = src.attributes
+
+        # ---- UNIT ----
+        unit = restore_attrs.get("unit_of_measurement")
+        if not unit:
+            unit = source_attrs.get("unit_of_measurement")
+        if unit:
+            self._attr_native_unit_of_measurement = unit
+
+        # ---- STATE CLASS ----
+        state_class = restore_attrs.get("state_class")
+        if not state_class:
+            state_class = source_attrs.get("state_class")
+        if state_class:
+            self._attr_state_class = state_class
+
+        # ---- DEVICE CLASS ----
+        device_class = restore_attrs.get("device_class")
+        if not device_class:
+            device_class = source_attrs.get("device_class")
+        if device_class:
+            self._attr_device_class = device_class
+
+        # ---- VALUE ----
+        if last_state and last_state.state not in ("unknown", "unavailable"):
+            try:
+                self._attr_native_value = float(last_state.state)
+            except (ValueError, TypeError):
+                pass
+
+        # ---- WRITE IMMEDIATELY IF STRUCTURE EXISTS ----
+        if (
+            self._attr_native_unit_of_measurement
+            or self._attr_state_class
+            or self._attr_device_class
+        ):
+            self.async_write_ha_state()
+        else:
+            _LOGGER.warning(
+                "Lowpass: restore failed for %s — no structural attributes "
+                "(restore=%s, source=%s)",
+                self.entity_id,
+                list(restore_attrs.keys()) if restore_attrs else [],
+                list(source_attrs.keys()) if source_attrs else [],
+            )
 
         # ------------------------------------------------------------
         # Dynamic naming only when name mode is not active
@@ -239,6 +330,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         ema = data.get("ema_source", {})
         core.src_mean = ema.get("src_mean")
         core.src_m2 = ema.get("src_m2")
+        core.t_sigma_start = ema.get("t_sigma_start")
+
         if core.src_mean is not None and core.src_m2 is not None:
             core.src_var = max(core.src_m2 - core.src_mean**2, 0.0)
             core.src_sigma = core.src_var ** 0.5
@@ -257,8 +350,10 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # ------------------------------------------------------------
     # Export internal state (HA-native persistence)
     # ------------------------------------------------------------
-    async def async_get_extra_restore_data(self):
-        return {
+
+    @property
+    def extra_restore_state_data(self):
+        data = {
             "low_pass": {
                 "y": self.core.y,
                 "t_prev": self.core.t_prev,
@@ -269,6 +364,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             "ema_source": {
                 "src_mean": self.core.src_mean,
                 "src_m2": self.core.src_m2,
+                "t_sigma_start": self.core.t_sigma_start,
             },
             "ema_dt_source": {
                 "dt_mean": self.injector.dt_mean,
@@ -280,6 +376,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "dt_output_m2": self.publisher.dt_output_m2,
             },
         }
+
+        return LowpassExtraData(data)
 
     # ------------------------------------------------------------
     # Handle real source updates

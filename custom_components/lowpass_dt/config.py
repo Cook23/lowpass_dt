@@ -27,20 +27,6 @@ MAX_PATTERN_ENTITIES = 100
 
 
 # ------------------------------------------------------------
-# Utility: derive rounding precision from fixed deadband
-# ------------------------------------------------------------
-def _default_round_from_deadband(deadband: float | None) -> int:
-    """Derive display rounding from fixed deadband."""
-    if deadband is not None and deadband >= 10:
-        return 0
-    if deadband is not None and deadband >= 1:
-        return 1
-    if deadband is None or deadband <= 0:
-        return 2
-    return max(0, int(math.ceil(-math.log10(deadband))) + 1)
-
-
-# ------------------------------------------------------------
 # Small numeric helper (NO behavior change)
 # ------------------------------------------------------------
 def _float_or_default(value, default):
@@ -101,12 +87,12 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             deadband = None
 
     # deadband_k_sigma (must be > 0)
-    deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 2.0), 2.0)
+    deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 3.0), 3.0)
     if deadband_k_sigma <= 0:
-        _LOGGER.warning("deadband_k_sigma must be > 0, using default 2.0")
-        deadband_k_sigma = 2.0
+        _LOGGER.warning("deadband_k_sigma must be > 0, using default 3.0")
+        deadband_k_sigma = 3.0
 
-    # deadband_tau_sigma (must be > 0)
+    # deadband_tau_sigma (must be > 10)
     default_deadband_tau_sigma = max(100.0 * tau, 10.0)
     raw_tau_sigma = item.get(CONF_DEADBAND_TAU_SIGMA)
 
@@ -126,10 +112,10 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         try:
             rounding = int(item.get(CONF_ROUND))
         except Exception:
-            _LOGGER.warning("Invalid rounding=%r, using fallback 2", item.get(CONF_ROUND))
-            rounding = 2
+            _LOGGER.warning("Invalid rounding=%r, using dynamic rounding", item.get(CONF_ROUND))
+            rounding = None
     else:
-        rounding = _default_round_from_deadband(deadband)
+        rounding = None
 
     # min_rate_dt (must be >= 0)
     min_rate_dt = _float_or_default(item.get(CONF_MIN_RATE_DT, 3600.0), 3600.0)

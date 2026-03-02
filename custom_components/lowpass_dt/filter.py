@@ -26,6 +26,9 @@ class LowpassCore:
         # integral error
         self.err_i = 0.0
 
+        # sigma horizon start (None = just started / no restore)
+        self.t_sigma_start = None
+
     # ------------------------------------------------------------
     # Update filter from real source value
     # ------------------------------------------------------------
@@ -34,6 +37,7 @@ class LowpassCore:
         if self.y is None:
             self.y = x
             self.t_prev = now
+            self.t_sigma_start = now
 
             # Always initialize stats
             self.src_mean = x
@@ -57,9 +61,20 @@ class LowpassCore:
         # -------------------------
         # EMA of filtered signal
         # -------------------------
-        # Always update stats (even if deadband is fixed)
-        tau_s = max(0.0, float(self.cfg.deadband_tau_sigma))
-        beta = (dt / (tau_s + dt)) if (tau_s + dt) > 0 else 0.1
+
+        tau_lp = max(0.0, float(self.cfg.tau))
+        tau_s_min = 10.0 * tau_lp
+        tau_s_max = max(0.0, float(self.cfg.deadband_tau_sigma))
+
+        if self.t_sigma_start is None:
+            # just started (no restore context)
+            tau_s_dynamic = tau_s_min
+        else:
+            elapsed = max(0.0, now - self.t_sigma_start)
+            tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
+
+        beta = (dt / (tau_s_dynamic + dt)) if (tau_s_dynamic + dt) > 0 else 0.1
+
         y = float(self.y)
 
         if self.src_mean is None or self.src_m2 is None:
@@ -101,7 +116,7 @@ class LowpassCore:
         if self.cfg.deadband is not None:
             return float(self.cfg.deadband)
         sigma = float(self.src_sigma) if self.src_sigma is not None else 0.0
-        return max(0.0, float(self.cfg.deadband_k_sigma) * sigma)
+        return max(0.001, float(self.cfg.deadband_k_sigma) * sigma)
 
     # ------------------------------------------------------------
     # Decide if a publish should occur

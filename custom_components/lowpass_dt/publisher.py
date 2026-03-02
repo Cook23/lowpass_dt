@@ -5,6 +5,20 @@ import math
 _LOGGER = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------
+# Utility: derive rounding precision from fixed deadband
+# ------------------------------------------------------------
+def _default_round_from_deadband(deadband: float | None) -> int:
+    """Derive display rounding from fixed deadband."""
+    if deadband is not None and deadband >= 10:
+        return 0
+    if deadband is not None and deadband >= 1:
+        return 1
+    if deadband is None or deadband <= 0:
+        return 2
+    return max(0, int(math.ceil(-math.log10(deadband))) + 1)
+
+
 class Publisher:
     """Handle publishing filtered values and injected updates."""
 
@@ -24,14 +38,6 @@ class Publisher:
         # NEW: ignore first dt_output after source resumes
         # ------------------------------------------------------------
         self.output_just_resumed = False
-
-    # ------------------------------------------------------------
-    # Deadband computation (NO LOGIC CHANGE)
-    # ------------------------------------------------------------
-    def _compute_deadband(self):
-        if self.cfg.deadband is not None and self.cfg.deadband > 0:
-            return self.cfg.deadband
-        return 0.1
 
     # ------------------------------------------------------------
     # Convergence detection (NO LOGIC CHANGE)
@@ -106,7 +112,7 @@ class Publisher:
         # ------------------------------------------------------------
         # 1. Deadband
         # ------------------------------------------------------------
-        deadband = self._compute_deadband()
+        deadband = self.core.effective_deadband()
 
         # ------------------------------------------------------------
         # 2. Convergence detection
@@ -130,11 +136,14 @@ class Publisher:
         if self.cfg.max_rate_dt > 0:
             last_pub = self.core.t_last_pub
             if last_pub is not None and (now - last_pub) < self.cfg.max_rate_dt:
-                _LOGGER.warning(
-                    "Lowpass: publish blocked by max_rate_dt (%.1fs) for %s",
-                    self.cfg.max_rate_dt,
-                    self.cfg.source,
-                )
+                if self.core.t_sigma_start is not None:
+                    elapsed = now - self.core.t_sigma_start
+                    if elapsed >= self.cfg.deadband_tau_sigma:
+                        _LOGGER.warning(
+                            "Lowpass: publish blocked by max_rate_dt (%.1fs) for %s",
+                            self.cfg.max_rate_dt,
+                            self.cfg.source,
+                        )
                 return
 
         # ------------------------------------------------------------
@@ -143,10 +152,11 @@ class Publisher:
         reported = float(self.core.y)
 
         if self.cfg.rounding is not None:
-            try:
-                reported = round(reported, int(self.cfg.rounding))
-            except Exception:
-                pass
+            decimals = self.cfg.rounding
+        else:
+            decimals = _default_round_from_deadband(deadband)
+
+        reported = round(reported, decimals)
 
         # ------------------------------------------------------------
         # 6. Apply convergence override if needed
@@ -185,12 +195,49 @@ class Publisher:
         # ------------------------------------------------------------
         s._attr_native_value = reported
         s._attr_native_unit_of_measurement = attrs.get("unit_of_measurement")
-        s._attr_device_class = attrs.get("device_class")
-        s._attr_state_class = attrs.get("state_class")
         s._attr_icon = attrs.get("icon")
 
+        # Copy device_class (runtime safe)
+        device_class = attrs.get("device_class")
+        s._attr_device_class = device_class
+
+        # Determine state_class:
+        # 1) Use source state_class if provided
+        # 2) Otherwise infer from device_class if provided
+
+        # Source state_class (if explicitly provided by source)
+        state_class = attrs.get("state_class")
+        if state_class is not None:
+            # Always trust explicit source state_class
+            s._attr_state_class = state_class
+
+        else:
+            # No state_class from source → infer from device_class
+            # Only set it once to avoid HA warnings
+            if getattr(s, "_attr_state_class", None) is None:
+
+                if device_class in (
+                    "power",
+                    "current",
+                    "voltage",
+                    "temperature",
+                    "humidity",
+                    "pressure",
+                    "frequency",
+                    "signal_strength",
+                ):
+                    s._attr_state_class = "measurement"
+
+                elif device_class in (
+                    "energy",
+                    "gas",
+                    "water",
+                ):
+                    s._attr_state_class = "total_increasing"
+
+
         # ------------------------------------------------------------
-        # 11. Attributes (clean UI � no persistence blobs)
+        # 11. Attributes
         # ------------------------------------------------------------
         s._attr_extra_state_attributes = {
             "source": self.cfg.source,
@@ -206,7 +253,7 @@ class Publisher:
                 "source_silence_3sigma": self.dt_silence,
                 "silent": inj.silent,
             },
-            
+
             "deadband": {
                 "deadband": self.core.effective_deadband(),
                 "deadband_tau_sigma": self.cfg.deadband_tau_sigma,
