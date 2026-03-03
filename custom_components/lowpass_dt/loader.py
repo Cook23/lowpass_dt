@@ -151,33 +151,56 @@ async def async_setup_entry_loader(
     @callback
     def _full_rescan_after_start(_event):
 
-        matched_cfgs: dict[str, LowpassCfg] = {}
+        create_cfgs: dict[str, LowpassCfg] = {}   # création (filtrée)
+        keep_cfgs: dict[str, LowpassCfg] = {}      # existence pure
 
         # Scan runtime states only (never registry)
         all_sensor_entities = [
             st.entity_id for st in hass.states.async_all("sensor")
         ]
 
+        # ------------------------------------------------------------
+        # Scan sources
+        # ------------------------------------------------------------
         for p in patterns_list:
+
             pat = _validate_pattern_item(p)
             if not pat:
                 continue
 
             local_count = 0
 
-            for eid in all_sensor_entities:
+            reg = er.async_get(hass)
+
+            for reg_entry in reg.entities.values():
+
+                if reg_entry.domain != "sensor":
+                    continue
+
+                eid = reg_entry.entity_id
 
                 if eid in explicit:
                     continue
 
-                st = hass.states.get(eid)
-                if not st:
-                    continue
-
-                if st.state in (None, "unknown", "unavailable"):
-                    continue
-
                 if not fnmatch.fnmatch(eid, pat):
+                    continue
+
+                if reg.async_get(eid) is None:
+                    continue
+
+                # -------- KEEP (existence only) --------
+                keep_cfgs[eid] = build_cfg(
+                    p,
+                    source=eid,
+                    allow_unique_id=False,
+                )
+
+                # -------- CREATE (filtré) --------
+                st = hass.states.get(eid)
+                if st is None:
+                    continue
+
+                if st.state in (None, "unavailable"):
                     continue
 
                 # Recursion protection (entity_id only)
@@ -193,77 +216,74 @@ async def async_setup_entry_loader(
 
                 if local_count > MAX_PATTERN_ENTITIES:
                     _LOGGER.warning(
-                        "LP patterns[]: pattern '%s' exceeded limit (%d). Aborted for this pattern.",
+                        "LP patterns[]: pattern '%s' exceeded limit (%d).",
                         pat,
                         MAX_PATTERN_ENTITIES,
                     )
                     break
 
-                matched_cfgs[eid] = build_cfg(
-                    p,
-                    source=eid,
-                    allow_unique_id=False,
-                )
+                create_cfgs[eid] = keep_cfgs[eid]
 
         # ------------------------------------------------------------
-        # Precompute meta
+        # Compute keep_unique_ids
         # ------------------------------------------------------------
+        keep_unique_ids: set[str] = set()
 
-        cfgs = list(explicit.values()) + list(matched_cfgs.values())
+        for cfg in explicit.values():
+            meta = make_meta(hass, cfg, is_pattern=False)
+            keep_unique_ids.add(meta.unique_id)
 
-        cfg_meta: dict[str, CfgMeta] = {}
-        desired_unique_ids.clear()
-
-        for cfg in cfgs:
-            is_pattern = cfg.source in matched_cfgs
-            meta = make_meta(hass, cfg, is_pattern=is_pattern)
-            cfg_meta[cfg.source] = meta
-            desired_unique_ids.add(meta.unique_id)
+        for cfg in keep_cfgs.values():
+            meta = make_meta(hass, cfg, is_pattern=True)
+            keep_unique_ids.add(meta.unique_id)
 
         # ------------------------------------------------------------
-        # Cleanup (pattern mode only)
+        # CLEANUP (only if source truly gone)
         # ------------------------------------------------------------
+        reg = er.async_get(hass)
 
-        reg2 = er.async_get(hass)
-        removed = 0
-
-        for entity in list(reg2.entities.values()):
+        for entity in list(reg.entities.values()):
             if entity.config_entry_id != entry.entry_id:
                 continue
             if entity.platform != DOMAIN:
                 continue
-            if entity.unique_id not in desired_unique_ids:
+
+            # retrouver la source depuis unique_id
+            if entity.unique_id not in keep_unique_ids:
                 _LOGGER.warning(
                     "LP CLEANUP removing entity_id=%s unique_id=%s",
                     entity.entity_id,
                     entity.unique_id,
                 )
-                reg2.async_remove(entity.entity_id)
-                removed += 1
-
-        _LOGGER.warning("LP cleanup late: removed=%d", removed)
+                reg.async_remove(entity.entity_id)
 
         # ------------------------------------------------------------
-        # Create entities
+        # CREATE
         # ------------------------------------------------------------
+        entities = []
+        reg = er.async_get(hass)
 
-        entities = [
-            sensor_cls(
+        for cfg in create_cfgs.values():
+
+            meta = make_meta(hass, cfg, is_pattern=True)
+
+            ent = sensor_cls(
                 hass,
                 cfg,
-                is_pattern=cfg_meta[cfg.source].is_pattern,
-                precomputed=cfg_meta[cfg.source],
+                is_pattern=True,
+                precomputed=meta,
             )
-            for cfg in matched_cfgs.values()
-        ]
 
-        async_add_entities(entities)
+            entities.append(ent)
 
-        for ent in entities:
-            own_entity_ids.add(ent.entity_id)
-            suggested = getattr(ent, "_attr_suggested_object_id", None)
-            if suggested:
-                own_entity_ids.add(f"sensor.{suggested}")
+        if entities:
+            async_add_entities(entities)
+
+            for ent in entities:
+                own_entity_ids.add(ent.entity_id)
+                suggested = getattr(ent, "_attr_suggested_object_id", None)
+                if suggested:
+                    own_entity_ids.add(f"sensor.{suggested}")
 
     if patterns_list:
         unsub = hass.bus.async_listen_once(
@@ -317,6 +337,17 @@ async def async_setup_entry_loader(
             )
 
             meta = make_meta(hass, cfg, is_pattern=True)
+
+            reg = er.async_get(hass)
+
+            existing_entity_id = reg.async_get_entity_id(
+                "sensor",
+                DOMAIN,
+                meta.unique_id,
+            )
+
+            if existing_entity_id is not None:
+                return
 
             # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:

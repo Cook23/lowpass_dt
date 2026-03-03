@@ -161,7 +161,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # ------------------------------------------------------------
         self._attr_name = name_final
         self._use_name_mode = use_name
-        
+
         # ------------------------------------------------------------
         # ATTRIBUTES
         # ------------------------------------------------------------
@@ -189,10 +189,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if data:
             self._restore_internal_state(data.as_dict())
         else:
-            _LOGGER.warning(
-                "Lowpass: context lost or new entity for %s (empty filter state).",
-                self.entity_id,
-            )
+            if self.entity_id == f"sensor.{self._attr_suggested_object_id}":
+                _LOGGER.warning(
+                    "Lowpass: context lost or new entity for %s (empty filter state).",
+                    self.entity_id,
+                )
 
         # ------------------------------------------------------------
         # Rename via registry (deferred, safe)

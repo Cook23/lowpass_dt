@@ -146,39 +146,17 @@ class Publisher:
                         )
                 return
 
-        # ------------------------------------------------------------
-        # 5. Default reported value (filtered)
-        # ------------------------------------------------------------
-        reported = float(self.core.y)
-
-        if self.cfg.rounding is not None:
-            decimals = self.cfg.rounding
-        else:
-            decimals = _default_round_from_deadband(deadband)
-
-        reported = round(reported, decimals)
-
-        # ------------------------------------------------------------
-        # 6. Apply convergence override if needed
-        # ------------------------------------------------------------
-        override = self._apply_convergence_if_needed(
-            converged,
-            last_src,
-        )
-        if override is not None:
-            reported = override
-
         attrs = src_state.attributes or {}
 
         # ------------------------------------------------------------
-        # 7. Detect source resume ? ignore first dt_output
+        # 5. Detect source resume ignore first dt_output
         # ------------------------------------------------------------
         if not injected and getattr(inj, "source_just_resumed", False):
             self.output_just_resumed = True
             inj.source_just_resumed = False
 
         # ------------------------------------------------------------
-        # 8. Compute dt_output
+        # 6. Compute dt_output
         # ------------------------------------------------------------
         if self.core.t_last_pub is None:
             dt_output = None
@@ -186,14 +164,13 @@ class Publisher:
             dt_output = now - float(self.core.t_last_pub)
 
         # ------------------------------------------------------------
-        # 9. EMA(dt_output)
+        # 7. EMA(dt_output)
         # ------------------------------------------------------------
         dt_output_sigma = self._update_dt_output_stats(dt_output)
 
         # ------------------------------------------------------------
-        # 10. Standard HA fields
+        # 8. Standard HA fields
         # ------------------------------------------------------------
-        s._attr_native_value = reported
         s._attr_native_unit_of_measurement = attrs.get("unit_of_measurement")
         s._attr_icon = attrs.get("icon")
 
@@ -235,6 +212,32 @@ class Publisher:
                 ):
                     s._attr_state_class = "total_increasing"
 
+        # ------------------------------------------------------------
+        # 9. Default reported value (filtered)
+        # ------------------------------------------------------------
+        reported = float(self.core.y)
+
+        if self.cfg.rounding is not None:
+            decimals = self.cfg.rounding
+        else:
+            if s._attr_state_class == "total_increasing":
+                decimals = 3
+            else:
+                decimals = _default_round_from_deadband(deadband)
+
+        reported = round(reported, decimals)
+
+        # ------------------------------------------------------------
+        # 10. Apply convergence override if needed
+        # ------------------------------------------------------------
+        override = self._apply_convergence_if_needed(
+            converged,
+            last_src,
+        )
+        if override is not None:
+            reported = override
+
+        s._attr_native_value = reported
 
         # ------------------------------------------------------------
         # 11. Attributes
