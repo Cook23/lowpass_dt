@@ -82,6 +82,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self.publisher = Publisher(self, cfg, self.core)
 
         self._last_source_value = None
+        self._reset_pending = False
 
         self.injector = TauInjector(
             hass,
@@ -396,6 +397,28 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             return
 
         now = dt_util.utcnow().timestamp()
+
+        # RESET detection (strong drop only)
+        prev_src = self._last_source_value
+        if (
+            self._attr_state_class == "total_increasing"
+            and prev_src is not None
+            and x < prev_src * 0.5
+        ):
+            _LOGGER.warning(
+                "Lowpass RESET detected for %s: source dropped from %.6f to %.6f",
+                self.entity_id,
+                prev_src,
+                x,
+            )
+
+            # Hard reset of filter state
+            self.core.y = x
+            self.core.last_published = x
+            self.core.err_i = 0.0
+            self.core.t_prev = now
+
+            self._reset_pending = True
 
         # Update last source value
         self._last_source_value = x

@@ -1,4 +1,8 @@
+import logging
 import math
+
+_LOGGER = logging.getLogger(__name__)
+
 
 class LowpassCore:
     """Pure math core: low-pass, adaptive sigma, deadband, rounding."""
@@ -23,7 +27,9 @@ class LowpassCore:
         self.last_published = None
         self.t_last_pub = None
 
-        # integral error
+        # error for deadband
+        self.err = 0.0
+        # integral error for deadband
         self.err_i = 0.0
 
         # sigma horizon start (None = just started / no restore)
@@ -121,39 +127,53 @@ class LowpassCore:
     # ------------------------------------------------------------
     # Decide if a publish should occur
     # ------------------------------------------------------------
-    def should_publish(self, now, force):
+    def should_publish(self, now):
         """Decide if we should publish."""
+
         if self.y is None:
             return False
 
-        deadband_eff = self.effective_deadband()
+        if self.t_last_pub is None or self.last_published is None:
+            return True
 
         # periodic publish
-        periodic_due = False
-        if self.cfg.min_rate_dt != 0:
-            if self.t_last_pub is None:
-                periodic_due = True
-            else:
-                periodic_due = (now - float(self.t_last_pub)) >= float(self.cfg.min_rate_dt)
+        if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
+            if (now - float(self.t_last_pub)) > float(self.cfg.min_rate_dt):
+                return True
 
         # deadband + integral correction
-        in_deadband = False
-        if (deadband_eff is not None) and (self.last_published is not None):
-            err = float(self.y) - float(self.last_published)
-            dt = max(0.0, now - float(self.t_last_pub)) if self.t_last_pub is not None else 0.0
+        deadband_eff = self.effective_deadband()
+        if (deadband_eff is not None):
 
-            tau_i = max(1e-6, float(self.cfg.tau))
+            self.err = float(self.y) - float(self.last_published)
 
-            if abs(err) < deadband_eff:
-                self.err_i += (err * dt) / tau_i
+            dt = max(0.0, now - float(self.t_last_pub))
+            tau_i = max(1.0, float(self.cfg.tau))
+            self.err_i = (self.err * dt) / tau_i
+
+            if abs(self.err) >= deadband_eff or abs(self.err_i) >= deadband_eff:
+
+                if self.cfg.max_rate_dt > 0:
+                    if (now - float(self.t_last_pub)) > float(self.cfg.max_rate_dt):
+                        return True
+                    else:
+                        if self.t_sigma_start is not None:
+                            elapsed = now - self.t_sigma_start
+                            if elapsed >= self.cfg.deadband_tau_sigma:
+                                _LOGGER.warning(
+                                    "Lowpass: publish blocked by max_rate_dt (%.1fs) for %s (deadband=%.6f, err=%.6f, err_i=%.6f)",
+                                    self.cfg.max_rate_dt,
+                                    self.cfg.source,
+                                    deadband_eff,
+                                    self.err,
+                                    self.err_i,
+                                )
+                        return False
+                else:
+                    return True
             else:
-                self.err_i = 0.0
-
-            in_deadband = (abs(err) < deadband_eff) and (abs(self.err_i) < deadband_eff)
-
-        if (not force) and in_deadband and (not periodic_due):
-            return False
-
+                return False
+    
         return True
 
     # ------------------------------------------------------------
@@ -162,7 +182,6 @@ class LowpassCore:
     def finalize_publish(self, now):
         self.last_published = float(self.y)
         self.t_last_pub = now
-        self.err_i = 0.0
 
     # ------------------------------------------------------------
     # Persistence: export minimal state
@@ -171,7 +190,6 @@ class LowpassCore:
         return {
             "last_published": self.last_published,
             "t_last_pub": self.t_last_pub,
-            "err_i": self.err_i,
         }
 
     # ------------------------------------------------------------
@@ -180,4 +198,3 @@ class LowpassCore:
     def import_state(self, state):
         self.last_published = state.get("last_published")
         self.t_last_pub = state.get("t_last_pub")
-        self.err_i = state.get("err_i", 0.0)

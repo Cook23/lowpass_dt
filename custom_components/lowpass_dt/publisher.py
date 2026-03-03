@@ -16,7 +16,7 @@ def _default_round_from_deadband(deadband: float | None) -> int:
         return 1
     if deadband is None or deadband <= 0:
         return 2
-    return max(0, int(math.ceil(-math.log10(deadband))) + 1)
+    return min(6, max(0, int(math.ceil(-math.log10(deadband))) + 1))
 
 
 class Publisher:
@@ -127,36 +127,20 @@ class Publisher:
         # 3. Publication rule
         # ------------------------------------------------------------
         if not converged:
-            if not self.core.should_publish(now, force):
-                return
-
-        # ------------------------------------------------------------
-        # 4. Absolute rate limiting
-        # ------------------------------------------------------------
-        if self.cfg.max_rate_dt > 0:
-            last_pub = self.core.t_last_pub
-            if last_pub is not None and (now - last_pub) < self.cfg.max_rate_dt:
-                if self.core.t_sigma_start is not None:
-                    elapsed = now - self.core.t_sigma_start
-                    if elapsed >= self.cfg.deadband_tau_sigma:
-                        _LOGGER.warning(
-                            "Lowpass: publish blocked by max_rate_dt (%.1fs) for %s",
-                            self.cfg.max_rate_dt,
-                            self.cfg.source,
-                        )
+            if not self.core.should_publish(now):
                 return
 
         attrs = src_state.attributes or {}
 
         # ------------------------------------------------------------
-        # 5. Detect source resume ignore first dt_output
+        # 4. Detect source resume ignore first dt_output
         # ------------------------------------------------------------
         if not injected and getattr(inj, "source_just_resumed", False):
             self.output_just_resumed = True
             inj.source_just_resumed = False
 
         # ------------------------------------------------------------
-        # 6. Compute dt_output
+        # 5. Compute dt_output
         # ------------------------------------------------------------
         if self.core.t_last_pub is None:
             dt_output = None
@@ -164,12 +148,12 @@ class Publisher:
             dt_output = now - float(self.core.t_last_pub)
 
         # ------------------------------------------------------------
-        # 7. EMA(dt_output)
+        # 6. EMA(dt_output)
         # ------------------------------------------------------------
         dt_output_sigma = self._update_dt_output_stats(dt_output)
 
         # ------------------------------------------------------------
-        # 8. Standard HA fields
+        # 7. Standard HA fields
         # ------------------------------------------------------------
         s._attr_native_unit_of_measurement = attrs.get("unit_of_measurement")
         s._attr_icon = attrs.get("icon")
@@ -213,29 +197,57 @@ class Publisher:
                     s._attr_state_class = "total_increasing"
 
         # ------------------------------------------------------------
-        # 9. Default reported value (filtered)
+        # 8. Apply convergence override if needed
         # ------------------------------------------------------------
         reported = float(self.core.y)
 
-        if self.cfg.rounding is not None:
-            decimals = self.cfg.rounding
-        else:
-            if s._attr_state_class == "total_increasing":
-                decimals = 3
-            else:
-                decimals = _default_round_from_deadband(deadband)
-
-        reported = round(reported, decimals)
-
-        # ------------------------------------------------------------
-        # 10. Apply convergence override if needed
-        # ------------------------------------------------------------
         override = self._apply_convergence_if_needed(
             converged,
             last_src,
         )
         if override is not None:
             reported = override
+
+        # ------------------------------------------------------------
+        # 9. Round reported value (filtered)
+        # ------------------------------------------------------------
+        if self.cfg.rounding is not None:
+            decimals = self.cfg.rounding
+        else:
+            decimals = _default_round_from_deadband(deadband)
+
+        reported = round(reported, decimals)
+
+        # ------------------------------------------------------------
+        # 10. Monoticity
+        # ------------------------------------------------------------
+
+        prev = s._attr_native_value
+
+        if (
+            s._attr_state_class == "total_increasing"
+            and prev is not None
+            and reported < prev
+        ):
+            if getattr(self.sensor, "_reset_pending", False):
+
+                _LOGGER.warning(
+                    "Lowpass monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
+                    s.entity_id,
+                    prev,
+                    reported,
+                )
+                self.sensor._reset_pending = False
+
+            else:
+                _LOGGER.warning(
+                    "Lowpass monotonicity break BLOCKED for %s: %.6f → %.6f",
+                    s.entity_id,
+                    prev,
+                    reported,
+                )
+
+                return
 
         s._attr_native_value = reported
 

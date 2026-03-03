@@ -87,10 +87,10 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             deadband = None
 
     # deadband_k_sigma (must be > 0)
-    deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 3.0), 3.0)
+    deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 2.0), 2.0)
     if deadband_k_sigma <= 0:
-        _LOGGER.warning("deadband_k_sigma must be > 0, using default 3.0")
-        deadband_k_sigma = 3.0
+        _LOGGER.warning("deadband_k_sigma must be > 0, using default 2.0")
+        deadband_k_sigma = 2.0
 
     # deadband_tau_sigma (must be > 10)
     default_deadband_tau_sigma = max(100.0 * tau, 10.0)
