@@ -20,12 +20,9 @@ class LowpassCore:
         self.src_sigma = None
         self.src_m2 = None
 
-        # adaptive deadband flag
-        self.adaptive_deadband = (cfg.deadband is None)
-
         # last published (unrounded)
         self.last_published = None
-        self.t_last_pub = None
+        self.time_last_pub = None
 
         # error for deadband
         self.err = 0.0
@@ -51,7 +48,7 @@ class LowpassCore:
             self.src_var = 0.0
             self.src_sigma = 0.0
 
-            return 0.0, 1.0
+            return 0.0
 
         # -------------------------
         # low-pass
@@ -61,7 +58,7 @@ class LowpassCore:
         dt = min(max(0.0, now - t_prev), tau)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
-        self.y = float(self.y) + alpha * (x - float(self.y))
+        self.y = self.y + alpha * (x - self.y)
         self.t_prev = now
 
         # -------------------------
@@ -81,7 +78,7 @@ class LowpassCore:
 
         beta = (dt / (tau_s_dynamic + dt)) if (tau_s_dynamic + dt) > 0 else 0.1
 
-        y = float(self.y)
+        y = self.y
 
         if self.src_mean is None or self.src_m2 is None:
             self.src_mean = y
@@ -94,7 +91,7 @@ class LowpassCore:
 
         self.src_sigma = math.sqrt(self.src_var)
 
-        return dt, alpha
+        return dt
 
     # ------------------------------------------------------------
     # Update filter using synthetic (injected) source value
@@ -102,7 +99,7 @@ class LowpassCore:
     def update_synthetic(self, last_source_value, now):
         """Update filter using last real source value (injection)."""
         if self.y is None:
-            return 0.0, 1.0
+            return 0.0
 
         # low-pass
         tau = max(0.0, float(self.cfg.tau))
@@ -110,7 +107,7 @@ class LowpassCore:
         dt = min(max(0.0, now - t_prev), tau)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
-        self.y = float(self.y) + alpha * (last_source_value - float(self.y))
+        self.y = self.y + alpha * (last_source_value - self.y)
         self.t_prev = now
 
         return dt
@@ -133,55 +130,53 @@ class LowpassCore:
         if self.y is None:
             return False
 
-        if self.t_last_pub is None or self.last_published is None:
+        if self.time_last_pub is None or self.last_published is None:
             return True
 
         # periodic publish
         if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
-            if (now - float(self.t_last_pub)) > float(self.cfg.min_rate_dt):
+            if (now - self.time_last_pub) > self.cfg.min_rate_dt:
                 return True
 
         # deadband + integral correction
         deadband_eff = self.effective_deadband()
-        if (deadband_eff is not None):
+        self.err = self.y - self.last_published
 
-            self.err = float(self.y) - float(self.last_published)
+        dt = max(0.0, now - self.time_last_pub)
+        tau_i = max(1.0, self.cfg.tau)
+        self.err_i = (self.err * dt) / tau_i
 
-            dt = max(0.0, now - float(self.t_last_pub))
-            tau_i = max(1.0, float(self.cfg.tau))
-            self.err_i = (self.err * dt) / tau_i
+        if abs(self.err) >= deadband_eff or abs(self.err_i) >= deadband_eff:
 
-            if abs(self.err) >= deadband_eff or abs(self.err_i) >= deadband_eff:
-
-                if self.cfg.max_rate_dt > 0:
-                    if (now - float(self.t_last_pub)) > float(self.cfg.max_rate_dt):
-                        return True
-                    else:
-                        if self.t_sigma_start is not None:
-                            elapsed = now - self.t_sigma_start
-                            if elapsed >= self.cfg.deadband_tau_sigma:
-                                _LOGGER.warning(
-                                    "Lowpass: publish blocked by max_rate_dt (%.1fs) for %s (deadband=%.6f, err=%.6f, err_i=%.6f)",
-                                    self.cfg.max_rate_dt,
-                                    self.cfg.source,
-                                    deadband_eff,
-                                    self.err,
-                                    self.err_i,
-                                )
-                        return False
-                else:
+            if self.cfg.max_rate_dt > 0:
+                if (now - self.time_last_pub) > self.cfg.max_rate_dt:
                     return True
+                else:
+                    if self.t_sigma_start is not None:
+                        elapsed = now - self.t_sigma_start
+                        if elapsed >= self.cfg.deadband_tau_sigma:
+                            _LOGGER.warning(
+                                "Publish blocked by max_rate_dt=%.1fs for %r (deadband=%.6f, err=%.6f, err_i=%.6f)",
+                                self.cfg.max_rate_dt,
+                                self.cfg.source,
+                                deadband_eff,
+                                self.err,
+                                self.err_i,
+                            )
+                    return False
             else:
-                return False
-    
+                return True
+        else:
+            return False
+
         return True
 
     # ------------------------------------------------------------
     # Finalize publish (update internal state)
     # ------------------------------------------------------------
     def finalize_publish(self, now):
-        self.last_published = float(self.y)
-        self.t_last_pub = now
+        self.last_published = self.y
+        self.time_last_pub = now
 
     # ------------------------------------------------------------
     # Persistence: export minimal state
@@ -189,7 +184,7 @@ class LowpassCore:
     def export_state(self):
         return {
             "last_published": self.last_published,
-            "t_last_pub": self.t_last_pub,
+            "time_last_pub": self.time_last_pub,
         }
 
     # ------------------------------------------------------------
@@ -197,4 +192,4 @@ class LowpassCore:
     # ------------------------------------------------------------
     def import_state(self, state):
         self.last_published = state.get("last_published")
-        self.t_last_pub = state.get("t_last_pub")
+        self.time_last_pub = state.get("time_last_pub")

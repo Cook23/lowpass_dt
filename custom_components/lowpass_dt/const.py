@@ -20,3 +20,6 @@ CONF_DEADBAND_K_SIGMA = "deadband_k_sigma"        # adaptive deadband multiplier
 
 CONF_MIN_RATE_DT = "min_rate_dt"                  # max interval between outputs (seconds)
 CONF_MAX_RATE_DT = "max_rate_dt"                  # min interval between outputs (rate limiter)
+
+CONF_UNIQUE_ID = "unique_id"                      # force explicit unique_id
+CONF_DEBUG = "debug"                              # autorise debut verbosity in attributes and log

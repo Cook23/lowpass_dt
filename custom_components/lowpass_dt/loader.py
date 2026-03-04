@@ -27,22 +27,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
-# Helpers (pure refactor � no behavior change)
+# Helpers (pure refactor no behavior change)
 # ------------------------------------------------------------
 
 def _validate_pattern_item(p: dict) -> str | None:
     if not isinstance(p, dict):
-        _LOGGER.warning(
-            "LP patterns[]: invalid item type %s (expected dict). Skipped.",
-            type(p).__name__,
-        )
+        _LOGGER.warning("patterns[]: invalid item type %s (expected dict). Skipped.", type(p).__name__)
         return None
 
     pat = p.get(CONF_MATCH)
     if not isinstance(pat, str) or not pat:
-        _LOGGER.warning(
-            "LP patterns[]: missing/invalid 'match' (expected non-empty string). Skipped."
-        )
+        _LOGGER.warning("patterns[]: invalid match=%r (expected non-empty string). Skipped.", pat)
         return None
 
     return pat
@@ -50,24 +45,16 @@ def _validate_pattern_item(p: dict) -> str | None:
 
 def _validate_sensor_item(item: dict) -> str | None:
     if not isinstance(item, dict):
-        _LOGGER.warning(
-            "LP sensors[]: invalid item type %s (expected dict). Skipped.",
-            type(item).__name__,
-        )
+        _LOGGER.warning("sensors[]: invalid item type %s (expected dict). Skipped.", type(item).__name__)
         return None
 
     source = item.get(CONF_SOURCE)
     if not isinstance(source, str) or not source:
-        _LOGGER.warning(
-            "LP sensors[]: missing/invalid 'source' (expected non-empty string). Skipped."
-        )
+        _LOGGER.warning("sensors[]: invalid source=%r (expected non-empty string). Skipped.", source)
         return None
 
     if "." not in source:
-        _LOGGER.warning(
-            "LP sensors[]: invalid source '%s' (missing domain like 'sensor.xxx'). Skipped.",
-            source,
-        )
+        _LOGGER.warning("sensors[]: invalid source=%r (missing domain like 'sensor.xxx'). Skipped.", source)
         return None
 
     return source
@@ -205,21 +192,13 @@ async def async_setup_entry_loader(
 
                 # Recursion protection (entity_id only)
                 if eid in own_entity_ids:
-                    _LOGGER.warning(
-                        "LP patterns[]: match '%s' includes '%s' (lowpass_dt sensor). Skipped to avoid recursion.",
-                        pat,
-                        eid,
-                    )
+                    _LOGGER.warning("patterns[]: match=%r includes lowpass sensor %r. Skipped to avoid recursion.", pat, eid)
                     continue
 
                 local_count += 1
 
                 if local_count > MAX_PATTERN_ENTITIES:
-                    _LOGGER.warning(
-                        "LP patterns[]: pattern '%s' exceeded limit (%d).",
-                        pat,
-                        MAX_PATTERN_ENTITIES,
-                    )
+                    _LOGGER.warning("patterns[]: match=%r exceeded limit=%d. Aborted.", pat, MAX_PATTERN_ENTITIES)
                     break
 
                 create_cfgs[eid] = keep_cfgs[eid]
@@ -250,11 +229,7 @@ async def async_setup_entry_loader(
 
             # retrouver la source depuis unique_id
             if entity.unique_id not in keep_unique_ids:
-                _LOGGER.warning(
-                    "LP CLEANUP removing entity_id=%s unique_id=%s",
-                    entity.entity_id,
-                    entity.unique_id,
-                )
+                _LOGGER.warning("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
                 reg.async_remove(entity.entity_id)
 
         # ------------------------------------------------------------
@@ -354,10 +329,7 @@ async def async_setup_entry_loader(
                 return
 
             if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
-                _LOGGER.error(
-                    "Pattern dynamic creation aborted: limit %d reached.",
-                    MAX_PATTERN_ENTITIES,
-                )
+                _LOGGER.error("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
                 return
 
             desired_unique_ids.add(meta.unique_id)

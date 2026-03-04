@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import logging
 from dataclasses import dataclass
 
@@ -52,8 +51,8 @@ class LowpassCfg:
     prefix: str
     suffix: str
 
-    # Only allowed for sensors/source mode (explicit), ignored/disabled for patterns/match
     unique_id: str | None
+    debug: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +74,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     # tau (must be > 0)
     tau = _float_or_default(item.get(CONF_TAU, 60.0), 60.0)
     if tau <= 0:
-        _LOGGER.warning("tau must be > 0, got %r, using default 60.0", tau)
+        _LOGGER.warning("Invalid tau=%r, must be > 0, using default 60.0", tau)
         tau = 60.0
 
     # deadband (None allowed, but if provided must be >= 0)
@@ -89,7 +88,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     # deadband_k_sigma (must be > 0)
     deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 2.0), 2.0)
     if deadband_k_sigma <= 0:
-        _LOGGER.warning("deadband_k_sigma must be > 0, using default 2.0")
+        _LOGGER.warning("Invalid deadband_k_sigma=%r, must be > 0, using default 2.0", item.get(CONF_DEADBAND_K_SIGMA))
         deadband_k_sigma = 2.0
 
     # deadband_tau_sigma (must be > 10)
@@ -102,9 +101,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         deadband_tau_sigma = _float_or_default(raw_tau_sigma, default_deadband_tau_sigma)
 
     if deadband_tau_sigma <= 0:
-        _LOGGER.warning(
-            "deadband_tau_sigma must be > 0, using derived default"
-        )
+        _LOGGER.warning("Invalid deadband_tau_sigma=%r, must be > 0, using derived default", item.get(CONF_DEADBAND_TAU_SIGMA))
         deadband_tau_sigma = default_deadband_tau_sigma
 
     # rounding
@@ -117,28 +114,34 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     else:
         rounding = None
 
-    # min_rate_dt (must be >= 0)
-    min_rate_dt = _float_or_default(item.get(CONF_MIN_RATE_DT, 3600.0), 3600.0)
-    if min_rate_dt < 0:
-        _LOGGER.warning("min_rate_dt must be >= 0, using default 3600.0")
-        min_rate_dt = 3600.0
-
     # max_rate_dt (must be >= 0)
     max_rate_dt = _float_or_default(item.get(CONF_MAX_RATE_DT, 10.0), 10.0)
+    # min_rate_dt (must be >= 0)
+    min_rate_dt = _float_or_default(item.get(CONF_MIN_RATE_DT, 3600.0), 3600.0)
+
     if max_rate_dt < 0:
-        _LOGGER.warning("max_rate_dt must be >= 0, using default 10.0")
+        _LOGGER.warning("Invalid max_rate_dt=%r, must be >= 0, using default 10.0", item.get(CONF_MAX_RATE_DT))
         max_rate_dt = 10.0
+
+    if min_rate_dt < 0:
+        _LOGGER.warning("Invalid min_rate_dt=%r, must be >= 0, using default 3600.0", item.get(CONF_MIN_RATE_DT))
+        min_rate_dt = 3600.0
+
+    if max_rate_dt >= min_rate_dt:
+        _LOGGER.warning("Invalid max_rate_dt=%r >= min_rate_dt=%r, publish interval must satisfy max_rate_dt < min_rate_dt, using defaults 10.0 and 3600.0", item.get(CONF_MAX_RATE_DT), item.get(CONF_MIN_RATE_DT))
+        max_rate_dt = 10.0
+        min_rate_dt = 3600.0
 
     # prefix
     prefix = item.get(CONF_PREFIX, "lp_")
     if not isinstance(prefix, str):
-        _LOGGER.warning("prefix must be a string, using default 'lp_'")
+        _LOGGER.warning("Invalid prefix=%r, must be a string, using default 'lp_'", item.get(CONF_PREFIX))
         prefix = "lp_"
 
     # suffix
     suffix = item.get(CONF_SUFFIX, "(Filtered)")
     if not isinstance(suffix, str):
-        _LOGGER.warning("suffix must be a string, using default '(Filtered)'")
+        _LOGGER.warning("Invalid suffix=%r, must be a string, using default '(Filtered)'", item.get(CONF_SUFFIX))
         suffix = "(Filtered)"
 
     # unique_id (sensors/source only)
@@ -148,15 +151,32 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         if isinstance(raw_uid, str) and raw_uid.strip():
             unique_id = raw_uid.strip()
         else:
-            _LOGGER.warning(
-                "unique_id must be a non-empty string. Ignored for source=%s.",
-                source,
-            )
+            _LOGGER.warning("Invalid unique_id=%r, must be a non-empty string, ignored for source=%r.", item.get(CONF_UNIQUE_ID), source)
+
+    # incompatibilities name vs prefix/suffix
+    name=item.get(CONF_NAME)
+    if allow_unique_id and name:
+        if CONF_PREFIX in item:
+            _LOGGER.warning("Ignoring prefix=%r because name=%r is defined for sensor %r",item.get(CONF_PREFIX), name, source)
+        if CONF_SUFFIX in item:
+            _LOGGER.warning("Ignoring suffix=%r because name=%r is defined for sensor %r",item.get(CONF_SUFFIX), name, source)
+
+    elif name and not allow_unique_id:
+        _LOGGER.warning("Ignoring name=%r for pattern-based sensor %r, use explicit sensor config", name, source)
+        name = None
+
+    # debug mode
+    raw_debug = item.get("debug", False)
+    if isinstance(raw_debug, bool):
+        debug = raw_debug
+    else:
+        _LOGGER.warning("Invalid debug=%r, must be true/false, using default False", raw_debug)
+        debug = False
 
     return LowpassCfg(
         source=source,
         tau=tau,
-        name=item.get(CONF_NAME),
+        name=name,
         rounding=rounding,
         deadband=deadband,
         deadband_k_sigma=deadband_k_sigma,
@@ -166,6 +186,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         prefix=prefix,
         suffix=suffix,
         unique_id=unique_id,
+        debug=debug,
     )
 
 
@@ -179,15 +200,7 @@ def compute_name_and_slug(
 ) -> tuple[str, str, bool]:
     """Compute final friendly_name, slug(name_final), and name_mode flag."""
 
-    use_name = False
-    if cfg.name and not is_pattern:
-        use_name = True
-    elif cfg.name and is_pattern:
-        _LOGGER.warning(
-            "Lowpass: 'name' ignored for pattern-based sensor %s. Use explicit sensor config.",
-            cfg.source,
-        )
-
+    use_name = cfg.name is not None
     if use_name:
         name_final = cfg.name
     else:
@@ -201,10 +214,7 @@ def compute_name_and_slug(
             if "." in cfg.source:
                 base = cfg.source.split(".", 1)[1]
             else:
-                _LOGGER.warning(
-                    "Lowpass: invalid source entity_id '%s' (missing domain).",
-                    cfg.source,
-                )
+                _LOGGER.warning("Invalid source entity_id=%r (missing domain)", cfg.source)
                 base = cfg.source
 
         name_final = f"{base} {cfg.suffix}"

@@ -142,10 +142,10 @@ class Publisher:
         # ------------------------------------------------------------
         # 5. Compute dt_output
         # ------------------------------------------------------------
-        if self.core.t_last_pub is None:
+        if self.core.time_last_pub is None:
             dt_output = None
         else:
-            dt_output = now - float(self.core.t_last_pub)
+            dt_output = now - self.core.time_last_pub
 
         # ------------------------------------------------------------
         # 6. EMA(dt_output)
@@ -232,7 +232,7 @@ class Publisher:
             if getattr(self.sensor, "_reset_pending", False):
 
                 _LOGGER.warning(
-                    "Lowpass monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
+                    "total_increasing monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
                     s.entity_id,
                     prev,
                     reported,
@@ -241,7 +241,7 @@ class Publisher:
 
             else:
                 _LOGGER.warning(
-                    "Lowpass monotonicity break BLOCKED for %s: %.6f → %.6f",
+                    "total_increasing monotonicity break BLOCKED for %s: %.6f → %.6f",
                     s.entity_id,
                     prev,
                     reported,
@@ -254,38 +254,49 @@ class Publisher:
         # ------------------------------------------------------------
         # 11. Attributes
         # ------------------------------------------------------------
-        s._attr_extra_state_attributes = {
-            "source": self.cfg.source,
-            "unique_id": s._unique_id_seed,
 
-            "tau_filter": self.cfg.tau,
-            "max_rate_dt": self.cfg.max_rate_dt,
-            "min_rate_dt": self.cfg.min_rate_dt,
-            "filter_output": float(self.core.y),
+        if not self.cfg.debug:
 
-            "source_dt": {
-                "source_dt": dt,
-                "source_silence_3sigma": self.dt_silence,
-                "silent": inj.silent,
-            },
+            # minimal attributes
+            s._attr_extra_state_attributes = {
+                "source": self.cfg.source,
+            }
 
-            "deadband": {
-                "deadband": self.core.effective_deadband(),
-                "deadband_tau_sigma": self.cfg.deadband_tau_sigma,
-                **(
-                    {"deadband_k_sigma": self.cfg.deadband_k_sigma}
-                    if self.cfg.deadband is None
-                    else {}
-                ),
-            "deadband_filtered_mean": self.core.src_mean,
-            "deadband_filtered_sigma": self.core.src_sigma,
-            },
+        else:
 
-            "dt_output": {
-                "dt_output": dt_output,
-                "dt_output_mean": self.dt_output_mean,
-                "dt_output_sigma": dt_output_sigma,
-            },
+            # full debug attributes
+            s._attr_extra_state_attributes = {
+                "source": self.cfg.source,
+                "unique_id": s._unique_id_seed,
+
+                "tau_filter": self.cfg.tau,
+                "max_rate_dt": self.cfg.max_rate_dt,
+                "min_rate_dt": self.cfg.min_rate_dt,
+                "filter_output": float(self.core.y),
+
+                "source_dt": {
+                    "source_dt": dt,
+                    "source_silence_3sigma": self.dt_silence,
+                    "silent": inj.silent,
+                },
+
+                "deadband": {
+                    "deadband": self.core.effective_deadband(),
+                    "deadband_tau_sigma": self.cfg.deadband_tau_sigma,
+                    **(
+                        {"deadband_k_sigma": self.cfg.deadband_k_sigma}
+                        if self.cfg.deadband is None
+                        else {}
+                    ),
+                "deadband_filtered_mean": self.core.src_mean,
+                "deadband_filtered_sigma": self.core.src_sigma,
+                },
+
+                "dt_output": {
+                    "dt_output": dt_output,
+                    "dt_output_mean": self.dt_output_mean,
+                    "dt_output_sigma": dt_output_sigma,
+                },
         }
 
         # ------------------------------------------------------------

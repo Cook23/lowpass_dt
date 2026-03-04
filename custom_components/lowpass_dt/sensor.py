@@ -133,16 +133,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self._attr_unique_id = f"{DOMAIN}::{seed}"
 
         # ------------------------------------------------------------
-        # Additional warning: name + prefix/suffix
-        # ------------------------------------------------------------
-        if use_name:
-            if cfg.prefix != "lp_" or cfg.suffix != "(Filtered)":
-                _LOGGER.warning(
-                    "Lowpass: 'prefix' or 'suffix' ignored because 'name' is defined for sensor %s.",
-                    cfg.source,
-                )
-
-        # ------------------------------------------------------------
         # ENTITY_ID / suggested_object_id
         # ------------------------------------------------------------
         if use_name:
@@ -171,7 +161,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._attr_state_class = None
         self._attr_device_class = None
         self._attr_native_value = None
-
+        self._attr_extra_state_attributes = {}
 
     async def async_added_to_hass(self) -> None:
         """Restore internal state and register listeners."""
@@ -191,10 +181,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self._restore_internal_state(data.as_dict())
         else:
             if self.entity_id == f"sensor.{self._attr_suggested_object_id}":
-                _LOGGER.warning(
-                    "Lowpass: context lost or new entity for %s (empty filter state).",
-                    self.entity_id,
-                )
+                _LOGGER.warning("context lost or new entity for %r (empty filter state).", self.entity_id)
 
         # ------------------------------------------------------------
         # Rename via registry (deferred, safe)
@@ -256,6 +243,9 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             except (ValueError, TypeError):
                 pass
 
+        # ---- SOURCE via EXTRA_STATE ----
+        self._attr_extra_state_attributes["source"] = self.cfg.source
+
         # ---- WRITE IMMEDIATELY IF STRUCTURE EXISTS ----
         if (
             self._attr_native_unit_of_measurement
@@ -265,8 +255,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "Lowpass: restore failed for %s — no structural attributes "
-                "(restore=%s, source=%s)",
+                "restore failed for %r — no structural attributes (restore=%s, source=%s)",
                 self.entity_id,
                 list(restore_attrs.keys()) if restore_attrs else [],
                 list(source_attrs.keys()) if source_attrs else [],
@@ -305,11 +294,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self._handle_source_event,
         )
 
-        _LOGGER.debug(
-            "LP entity added: %s source=%s",
-            self.entity_id,
-            self.cfg.source,
-        )
+        _LOGGER.debug("entity added: %s source=%s", self.entity_id, self.cfg.source)
 
     # ------------------------------------------------------------
     # Restore internal engine state (HA-native)
@@ -324,7 +309,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         lp = data.get("low_pass", {})
         core.y = lp.get("y")
         core.t_prev = lp.get("t_prev")
-        core.t_last_pub = lp.get("t_last_pub")
+        core.time_last_pub = lp.get("time_last_pub")
         core.err_i = lp.get("err_i", 0.0)
         core.last_published = lp.get("last_published")
 
@@ -359,7 +344,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             "low_pass": {
                 "y": self.core.y,
                 "t_prev": self.core.t_prev,
-                "t_last_pub": self.core.t_last_pub,
+                "time_last_pub": self.core.time_last_pub,
                 "err_i": self.core.err_i,
                 "last_published": self.core.last_published,
             },
@@ -400,17 +385,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         # RESET detection (strong drop only)
         prev_src = self._last_source_value
-        if (
-            self._attr_state_class == "total_increasing"
-            and prev_src is not None
-            and x < prev_src * 0.5
-        ):
-            _LOGGER.warning(
-                "Lowpass RESET detected for %s: source dropped from %.6f to %.6f",
-                self.entity_id,
-                prev_src,
-                x,
-            )
+        if (self._attr_state_class == "total_increasing" and prev_src is not None and x < prev_src * 0.5 ):
+            _LOGGER.warning("total_increasing RESET detected for source %s dropped from %.6f to %.6f", self.entity_id, prev_src, x)
 
             # Hard reset of filter state
             self.core.y = x
@@ -427,7 +403,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self.injector.set_last_source_time(now)
 
         # Update filter with real measurement
-        dt, _alpha = self.core.update_from_source(x, now)
+        dt = self.core.update_from_source(x, now)
 
         # PASS dt_silence_raw TO PUBLISHER
         self.publisher.dt_silence = self.injector.dt_silence_raw
