@@ -301,6 +301,22 @@ It should almost never be reached, except in cases of misconfiguration.
 
 ---
 
+### Circular 0-360°
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| circular | string | None | None or 360 / 2pi / 6.28 ... |
+
+---
+
+### Debug
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| debug | boolean | false | Increase attributes verbosity |
+
+---
+
 ## 🧩 Key Features
 
 | Feature | Supported |
