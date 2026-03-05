@@ -43,11 +43,19 @@ class Publisher:
     # Convergence detection (NO LOGIC CHANGE)
     # ------------------------------------------------------------
     def _check_convergence(self, injected, last_src, deadband):
-        return (
-            injected
-            and last_src is not None
-            and abs(self.core.y - last_src) < deadband
-        )
+    
+        if not injected or last_src is None:
+            return False
+    
+        if self.cfg.circular is None:
+            err = self.core.y - last_src
+        else:
+            err = (
+                (self.core.y - last_src + self.cfg.circular / 2)
+                % self.cfg.circular
+            ) - self.cfg.circular / 2
+    
+        return abs(err) < deadband
 
     # ------------------------------------------------------------
     # Apply convergence (NO LOGIC CHANGE)
@@ -145,7 +153,7 @@ class Publisher:
         if self.core.time_last_pub is None:
             dt_output = None
         else:
-            dt_output = now - self.core.time_last_pub
+            dt_output = max(0.0, now - self.core.time_last_pub)
 
         # ------------------------------------------------------------
         # 6. EMA(dt_output)

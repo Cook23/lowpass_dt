@@ -210,6 +210,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         restore_attrs = last_state.attributes if last_state else {}
 
+        if src is not None:
+            try:
+                self._last_source_value = float(src.state)
+            except Exception:
+                pass
+
         # Source may be unknown/unavailable but attributes can still exist
         source_attrs = {}
         if src is not None and isinstance(src.attributes, dict):
@@ -229,6 +235,14 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if state_class:
             self._attr_state_class = state_class
 
+        if self.cfg.circular is not None and self._attr_state_class == "total_increasing":
+            _LOGGER.warning(
+                "Sensor %s configured as circular (period=%s) but state_class=total_increasing. Disabling circular mode.",
+                self.entity_id,
+                self.cfg.circular,
+            )
+            self.cfg.circular = None
+
         # ---- DEVICE CLASS ----
         device_class = restore_attrs.get("device_class")
         if not device_class:
@@ -242,6 +256,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self._attr_native_value = float(last_state.state)
             except (ValueError, TypeError):
                 pass
+            self.core.y = self._attr_native_value
 
         # ---- SOURCE via EXTRA_STATE ----
         self._attr_extra_state_attributes["source"] = self.cfg.source
@@ -293,6 +308,13 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             [self.cfg.source],
             self._handle_source_event,
         )
+
+        # simulate silence timer expiration after restore
+        if self.core.y is not None and self._last_source_value is not None:
+            self.hass.loop.call_soon(self.injector._on_silence_detected, None)
+        else:
+            _LOGGER.debug("no source or outpup value for %s source=%s", self.entity_id, self.cfg.source)
+
 
         _LOGGER.debug("entity added: %s source=%s", self.entity_id, self.cfg.source)
 
@@ -386,7 +408,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # RESET detection (strong drop only)
         prev_src = self._last_source_value
         if (self._attr_state_class == "total_increasing" and prev_src is not None and x < prev_src * 0.5 ):
-            _LOGGER.warning("total_increasing RESET detected for source %s dropped from %.6f to %.6f", self.entity_id, prev_src, x)
+            _LOGGER.debug("total_increasing RESET detected for source %s dropped from %.6f to %.6f", self.entity_id, prev_src, x)
 
             # Hard reset of filter state
             self.core.y = x

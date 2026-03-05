@@ -9,7 +9,8 @@ CONF_NAME = "name"                                # explicit friendly name overr
 CONF_PREFIX = "prefix"                            # prefix for generated entity_id
 CONF_SUFFIX = "suffix"                            # suffix for generated friendly_name
 
-CONF_UNIQUE_ID = "unique_id"                      # OPTIONAL: force unique_id (explicit sensors only)
+CONF_UNIQUE_ID = "unique_id"                      # force unique_id (explicit sensors only)
+CONF_CIRCULAR = "circular"                        # circular censor like 0-360
 
 CONF_TAU = "tau"                                  # low-pass time constant (seconds)
 CONF_ROUND = "round"                              # rounding precision for output
@@ -21,5 +22,4 @@ CONF_DEADBAND_K_SIGMA = "deadband_k_sigma"        # adaptive deadband multiplier
 CONF_MIN_RATE_DT = "min_rate_dt"                  # max interval between outputs (seconds)
 CONF_MAX_RATE_DT = "max_rate_dt"                  # min interval between outputs (rate limiter)
 
-CONF_UNIQUE_ID = "unique_id"                      # force explicit unique_id
 CONF_DEBUG = "debug"                              # autorise debut verbosity in attributes and log

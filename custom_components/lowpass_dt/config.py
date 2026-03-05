@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import math
 import logging
+
 from dataclasses import dataclass
 
 from homeassistant.core import HomeAssistant
@@ -17,6 +19,8 @@ from .const import (
     CONF_SUFFIX,
     CONF_TAU,
     CONF_UNIQUE_ID,
+    CONF_DEBUG,
+    CONF_CIRCULAR,
     DOMAIN,
 )
 
@@ -41,6 +45,8 @@ class LowpassCfg:
     tau: float
     name: str | None
     rounding: int | None
+
+    circular: float | None
 
     deadband: float | None
     deadband_k_sigma: float
@@ -76,6 +82,25 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     if tau <= 0:
         _LOGGER.warning("Invalid tau=%r, must be > 0, using default 60.0", tau)
         tau = 60.0
+
+    raw_circular = item.get(CONF_CIRCULAR)
+    if raw_circular is None:
+        circular = None
+
+    elif isinstance(raw_circular, str):
+        v = raw_circular.strip().lower()
+
+        if v == "2pi":
+            circular = 2 * math.pi
+        else:
+            circular = _float_or_default(raw_circular, None)
+
+    else:
+        circular = _float_or_default(raw_circular, None)
+
+    if circular is not None and circular <= 0:
+        _LOGGER.warning("Invalid circular=%r, must be > 0, disabling circular mode", raw_circular)
+        circular = None
 
     # deadband (None allowed, but if provided must be >= 0)
     deadband = item.get(CONF_DEADBAND)
@@ -166,7 +191,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         name = None
 
     # debug mode
-    raw_debug = item.get("debug", False)
+    raw_debug = item.get(CONF_DEBUG, False)
     if isinstance(raw_debug, bool):
         debug = raw_debug
     else:
@@ -177,6 +202,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         source=source,
         tau=tau,
         name=name,
+        circular=circular,
         rounding=rounding,
         deadband=deadband,
         deadband_k_sigma=deadband_k_sigma,

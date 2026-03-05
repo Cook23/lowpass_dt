@@ -58,7 +58,14 @@ class LowpassCore:
         dt = min(max(0.0, now - t_prev), tau)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
-        self.y = self.y + alpha * (x - self.y)
+        if self.cfg.circular is None:
+            self.y = self.y + alpha * (x - self.y)
+        else:
+            self.y = (
+                self.y
+                + alpha * (((x - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
+            ) % self.cfg.circular
+
         self.t_prev = now
 
         # -------------------------
@@ -78,7 +85,13 @@ class LowpassCore:
 
         beta = (dt / (tau_s_dynamic + dt)) if (tau_s_dynamic + dt) > 0 else 0.1
 
-        y = self.y
+        if self.cfg.circular is None or self.src_mean is None:
+            y = self.y
+        else:
+            y = self.src_mean + (
+                (self.y - self.src_mean + self.cfg.circular / 2)
+                % self.cfg.circular
+            ) - self.cfg.circular / 2
 
         if self.src_mean is None or self.src_m2 is None:
             self.src_mean = y
@@ -107,7 +120,14 @@ class LowpassCore:
         dt = min(max(0.0, now - t_prev), tau)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
-        self.y = self.y + alpha * (last_source_value - self.y)
+        if self.cfg.circular is None:
+            self.y = self.y + alpha * (last_source_value - self.y)
+        else:
+            self.y = (
+                self.y
+                + alpha * (((last_source_value - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
+            ) % self.cfg.circular
+
         self.t_prev = now
 
         return dt
@@ -140,7 +160,13 @@ class LowpassCore:
 
         # deadband + integral correction
         deadband_eff = self.effective_deadband()
-        self.err = self.y - self.last_published
+
+        if self.cfg.circular is None:
+            self.err = self.y - self.last_published
+        else:
+            self.err = (
+                (self.y - self.last_published + self.cfg.circular / 2) % self.cfg.circular
+            ) - self.cfg.circular / 2
 
         dt = max(0.0, now - self.time_last_pub)
         tau_i = max(1.0, self.cfg.tau)
