@@ -101,12 +101,6 @@ class TauInjector:
             self.dt_mean = (1 - alpha) * self.dt_mean + alpha * dt
             self.dt_m2 = (1 - alpha) * self.dt_m2 + alpha * (dt * dt)
 
-        var = max(self.dt_m2 - self.dt_mean * self.dt_mean, 0.0)
-        std = math.sqrt(var)
-
-        dt_silence = self.dt_mean + 3.0 * std
-        self.dt_silence_raw = dt_silence
-
         self._compute_limits()
 
     # ------------------------------------------------------------
@@ -114,9 +108,16 @@ class TauInjector:
     # ------------------------------------------------------------
     def _compute_limits(self):
         tau = float(self.cfg.tau)
-
-        self.limit = max(min(self.dt_silence_raw, tau), 1.0)
-        self.interval = max(min(self.dt_mean, tau), 1.0)
+    
+        if self.dt_mean is not None and self.dt_m2 is not None:
+            var = max(self.dt_m2 - self.dt_mean ** 2, 0.0)
+            std = math.sqrt(var)
+            self.dt_silence_raw = self.dt_mean + 3.0 * std
+            self.limit = max(min(self.dt_silence_raw, tau), 1.0)
+            self.interval = max(min(self.dt_mean, tau), 1.0)
+        else:
+            self.limit = tau
+            self.interval = tau
 
     # ------------------------------------------------------------
     # Schedule silence one-shot

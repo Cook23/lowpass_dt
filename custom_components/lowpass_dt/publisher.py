@@ -305,7 +305,7 @@ class Publisher:
                     "dt_output_mean": self.dt_output_mean,
                     "dt_output_sigma": dt_output_sigma,
                 },
-        }
+            }
 
         # ------------------------------------------------------------
         # 12. Finalize

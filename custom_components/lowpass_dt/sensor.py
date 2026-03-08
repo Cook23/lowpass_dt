@@ -311,7 +311,10 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         # simulate silence timer expiration after restore
         if self.core.y is not None and self._last_source_value is not None:
-            self.hass.loop.call_soon(self.injector._on_silence_detected, None)
+            if self.injector.dt_mean is not None:
+                self.injector._schedule_silence_timer()
+            else:
+                self.hass.loop.call_soon(self.injector._on_silence_detected, None)
         else:
             _LOGGER.debug("no source or outpup value for %s source=%s", self.entity_id, self.cfg.source)
 
@@ -355,6 +358,10 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         dt_out = data.get("ema_dt_output", {})
         pub.dt_output_mean = dt_out.get("dt_output_mean")
         pub.dt_output_m2 = dt_out.get("dt_output_m2")
+
+        # Restaure Limit and Interval
+        if inj.dt_mean is not None and inj.dt_m2 is not None:
+            inj._compute_limits()
 
     # ------------------------------------------------------------
     # Export internal state (HA-native persistence)
