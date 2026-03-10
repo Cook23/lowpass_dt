@@ -1,39 +1,12 @@
-
-# ⚠️ Experimental Component – Read Before Using
-
-> **Tested by exactly one person: me.**
->
-> This integration is experimental.
->
-> It works well in my environment.
-> It might break yours.
->
-> Bugs can happen.
-> Edge cases may exist.
-> Math can go wrong.
-> Silence detection might misbehave.
->
-> 👉 **Back up your Home Assistant before installing.**
->
-> If something explodes, it's on you.
->
-> You have been warned.
-
-> 👉 **This component may generate a large number of warning messages in the logs.**
->
-> It is still in early development and initial validation phase.
-> Extensive logging is intentional and used to validate mathematical behavior,
-> edge cases, and stability under real-world conditions.
->
-> Log verbosity will be reduced in future stable versions.
-
----
-
 # Lowpass DT – Deterministic Time-Aware Filter for Home Assistant
 
 ![HACS](https://img.shields.io/badge/HACS-Custom-blue.svg)
 ![Experimental](https://img.shields.io/badge/status-experimental-orange)
 ![Math Driven](https://img.shields.io/badge/design-math%20driven-black)
+
+> ⚠️ **Experimental – tested by exactly one person: me.**
+> Works well in my environment. May break yours. Back up Home Assistant before installing.
+> Extensive logging is intentional during this validation phase and will be reduced in future stable versions.
 
 ---
 
@@ -133,9 +106,7 @@ deadband = k × sigma(filtered_signal)
 
 ## ⚙ Configuration
 
-### ⚙ Explicit Configuration Example
-
-You can configure each sensor:
+### Explicit Configuration Example
 
 ```yaml
 lowpass_dt:
@@ -149,36 +120,30 @@ lowpass_dt:
       max_rate_dt: 10
 ```
 
-Except for the `source` parameter, most parameters are optional. Default values are generally sufficient.
-Even `tau` is usually not required. The default value of 60 seconds is generally adequate.
+Except for `source`, all parameters are optional. Default values are generally sufficient.
 
 ---
 
-### ⚙ Batch Configuration Example
-
-Or you can configure multiple sensors in batch mode:
+### Batch Configuration Example
 
 ```yaml
-patterns:
-  - match: "sensor.temperature_*"
-    tau: 60
+lowpass_dt:
+  patterns:
+    - match: "sensor.temperature_*"
 ```
 
 No per-sensor tuning is required because parameters adapt automatically.
-Even `tau` is usually not required. The default value of 60 seconds is generally sufficient.
 
 ---
 
-### ⚙ How to Fine-Tune Parameters Beyond Default Values
+## 🔧 Fine-Tuning
 
-- Disable the deadband by setting `deadband: 0`
-- Plot historical curves of:
-  - the source measurement
-  - the filtered measurement
+- Disable the deadband by setting `deadband: 0` (minimum enforced value)
+- Plot historical curves of the source and filtered measurements
 - Adjust `tau` to filter out unwanted noise while preserving meaningful variations
-- Then you have two options:
-  - define a fixed deadband value
-  - or return to automatic deadband mode
+- Then choose:
+  - a fixed deadband value, or
+  - return to automatic deadband mode
 
 If you choose automatic deadband:
 
@@ -186,9 +151,9 @@ If you choose automatic deadband:
 - Wait approximately `300 × tau` for stabilization
   - if `tau = 1 minute`, wait at least 5 hours
   - if `tau = 1 hour`, wait at least 15 days
-- If needed, adjust `deadband_k_sigma`:
-  - Increase it to make the filter less sensitive
-  - Decrease it to make the filter more sensitive
+- Adjust `deadband_k_sigma` if needed:
+  - Increase to make the filter less sensitive
+  - Decrease to make the filter more sensitive
 
 ---
 
@@ -198,19 +163,38 @@ The implementation uses an integral deadband formula:
 
 ```
 e = y - y_last_published
-i = i + (e * dt) / tau   (only if |e| < D)
+i = (e * dt) / tau
 Publish if |e| >= D OR |i| >= D
 ```
 
-This means that a small variation, smaller than the deadband threshold, will still be recorded if it persists long enough.
-
-The time constant of this integral action is the same as the main low-pass filter `tau`.
+This means that a small variation, smaller than the deadband threshold, will still be recorded if it persists long enough. The time constant of this integral action is the same as the main low-pass filter `tau`.
 
 ---
 
-### ❗ Fine-Tuning in Explicit or Batch Configuration Mode
+## 📘 Parameters
 
-Fine-tuning is possible in both Explicit and Batch modes. In Batch mode, the parameters apply to all sensors in the batch and therefore should be similar.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `source` | string | required | Source sensor entity_id |
+| `match` | string | required | Source sensor match string (pattern mode) |
+| `tau` | float | 60.0 | Low-pass time constant in seconds |
+| `prefix` | string | `lp_` | Prefix for generated entity_id |
+| `suffix` | string | `(Filtered)` | Suffix added to the friendly name |
+| `name` | string | None | Explicit friendly name (disables prefix/suffix) |
+| `unique_id` | string | auto | Optional unique_id seed (explicit sensors only) |
+| `deadband` | float | None | Fixed deadband threshold |
+| `deadband_tau_sigma` | float | max(100×tau, 10) | Period over which sigma is estimated |
+| `deadband_k_sigma` | float | 2.0 | Deviation multiplier for deadband threshold |
+| `min_rate_dt` | float | 3600 | Maximum interval between publishes (heartbeat) |
+| `max_rate_dt` | float | 10 | Minimum interval between publishes (rate limiter) |
+| `round` | int | auto | Rounding precision for output |
+| `circular` | string | None | Period for circular sensors (`360`, `2pi`, …) |
+| `debug` | boolean | false | Enable verbose attributes |
+
+A match string should avoid matching already filtered entities. A prefix is added to the generated entity_id to prevent this. Recursion is automatically blocked if a misconfigured match string matches filtered entities. Creation is limited to 100 entities per match string.
+
+`min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
+`max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached.
 
 ---
 
@@ -223,116 +207,6 @@ Fine-tuning is possible in both Explicit and Batch modes. In Batch mode, the par
 
 ---
 
-## 📘 Parameters & Default Values
-
-### Explicit Mode
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| source | string | required | Source sensor entity_id |
-| tau | float | 60.0 | Low-pass tau time constant in seconds |
-
-### Pattern Mode
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| match | string | required | Source sensor match string |
-| tau | float | 60.0 | Low-pass tau time constant in seconds |
-
-A match string should avoid matching already filtered entities.
-A prefix is added to the generated entity_id to prevent this.
-Recursion is automatically blocked if a misconfigured match string matches filtered entities.
-To prevent misconfiguration from creating thousands of entities, creation is limited to 100 entities per match string.
-
----
-
-### Naming
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| prefix | string | "lp_" | Prefix for generated entity_id |
-| suffix | string | "(Filtered)" | Suffix added to the friendly name |
-| name | string | None | Explicit friendly name (disables prefix/suffix) |
-| unique_id | string | auto-generated | Optional unique_id seed (explicit sensors only) |
-
----
-
-### Fixed Deadband Mode
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| deadband | float | None | Deadband to limit output rate |
-
----
-
-### Adaptive Deadband Mode
-
-Adaptive deadband (default when `deadband` is not set):
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| deadband_tau_sigma | float | max(100 × tau, 10) | Period over which deadband is estimated |
-| deadband_k_sigma | float | 3.0 | Deviation multiplier for deadband threshold |
-
-Effective deadband = `k × sigma(filtered_signal)`
-
----
-
-### Rate Control
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| min_rate_dt | float | 3600 | Maximum interval between publishes (seconds) |
-| max_rate_dt | float | 10 | Minimum interval between publishes (rate limiter) |
-
-`min_rate_dt` prevents very long periods without states recorded in the Recorder.
-It can improve history graphs and dashboard cards.
-
-`max_rate_dt` should be considered a last line of defense against flooding the Recorder.
-It should almost never be reached, except in cases of misconfiguration.
-
----
-
-### Rounding
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| round | int | auto-derived | Avoid non-significant digits |
-
----
-
-### Circular 0-360°
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| circular | string | None | None or 360 / 2pi / 6.28 ... |
-
----
-
-### Debug
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| debug | boolean | false | Increase attributes verbosity |
-
----
-
-## 🧩 Key Features
-
-| Feature | Supported |
-|----------|-----------|
-| Δt-aware filtering | ✅ |
-| Silence detection | ✅ |
-| Synthetic injection | ✅ |
-| Adaptive deadband | ✅ |
-| Fixed deadband | ✅ |
-| Rate limiting | ✅ |
-| HA-native restore | ✅ |
-| Recorder optimization | ✅ |
-| Batch pattern mode | ✅ |
-
----
-
 ## 🏗 Architecture
 
 - **LowpassCore** → Pure math engine
@@ -340,8 +214,16 @@ It should almost never be reached, except in cases of misconfiguration.
 - **Publisher** → Home Assistant state exposure
 - **HA-native restore** → Clean persistence
 
-No polling.
-Fully event-driven.
+No polling. Fully event-driven.
+
+---
+
+## 📈 Performance
+
+- Event driven. No polling.
+- No background loops
+- Injection active only during silence
+- Safe for large sensor sets
 
 ---
 
@@ -354,15 +236,6 @@ Fully event-driven.
 
 ---
 
-## 📈 Performance
-
-- O(1) per update
-- No background loops
-- Injection active only during silence
-- Safe for large sensor sets
-
----
-
 ## 📜 License
 
 MIT
@@ -371,16 +244,11 @@ MIT
 
 ## 👤 Author
 
-Built to solve a real problem:
+Built to solve a real problem: filtering real-world asynchronous sensors without lying to the math.
 
-Filtering real-world asynchronous sensors without lying to the math.
+If you have experienced incorrect frozen values at the output of a filter, or seen filtered values behave erratically when the sensor reporting rate changes, this integration is for you.
 
-If you have experienced incorrect frozen values at the output of a filter,
-or seen filtered values behave erratically when the sensor reporting rate changes,
-this integration is for you.
-
-This is my first Home Assistant integration and my first software development project in Python.
-I come from the industrial automation and process control world, where C is king.
+This is my first Home Assistant integration and my first software development project in Python. I come from the industrial automation and process control world, where C is king.
 
 So yes, errors and mistakes are absolutely possible. Please be kind.
 
@@ -398,14 +266,14 @@ Instead of transmitting every sampled value, the system:
 - Dynamically estimates the noise level (σ)
 - Publishes only when the filtered signal deviates from the last published value by more than `k·σ`
 
-When `k = 3`, the probability that pure Gaussian noise triggers a transmission is approximately **0.27%**, making the encoder statistically near-optimal for suppressing noise-induced events while preserving meaningful signal variations.
+When `k = 2`, the probability that pure Gaussian noise triggers a transmission is approximately **5%**, making the encoder statistically near-optimal for suppressing noise-induced events while preserving meaningful signal variations.
 
 This approach is closely related to:
 
 - **Adaptive Delta Modulation (ADM)**
 - **Level-Crossing Sampling**
 - **Send-on-Delta transmission schemes**
-- Statistical thresholding based on **Rice’s level-crossing theory**
+- Statistical thresholding based on **Rice's level-crossing theory**
 
 #### Bibliography
 
