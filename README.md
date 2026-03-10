@@ -138,7 +138,7 @@ No per-sensor tuning is required because parameters adapt automatically.
 
 ## 🔧 Fine-Tuning
 
-- Disable the deadband by setting `deadband: 0` (minimum enforced value)
+- Disable the deadband by setting `deadband: 0`
 - Plot historical curves of the source and filtered measurements
 - Adjust `tau` to filter out unwanted noise while preserving meaningful variations
 - Then choose:
