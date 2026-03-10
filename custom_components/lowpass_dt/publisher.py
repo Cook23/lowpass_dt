@@ -43,10 +43,10 @@ class Publisher:
     # Convergence detection (NO LOGIC CHANGE)
     # ------------------------------------------------------------
     def _check_convergence(self, injected, last_src, deadband):
-    
+
         if not injected or last_src is None:
             return False
-    
+
         if self.cfg.circular is None:
             err = self.core.y - last_src
         else:
@@ -54,7 +54,7 @@ class Publisher:
                 (self.core.y - last_src + self.cfg.circular / 2)
                 % self.cfg.circular
             ) - self.cfg.circular / 2
-    
+
         return abs(err) < deadband
 
     # ------------------------------------------------------------
@@ -164,11 +164,14 @@ class Publisher:
         # 7. Standard HA fields
         # ------------------------------------------------------------
         s._attr_native_unit_of_measurement = attrs.get("unit_of_measurement")
-        s._attr_icon = attrs.get("icon")
+        icon = attrs.get("icon")
+        if icon is not None:
+            s._attr_icon = icon
 
         # Copy device_class (runtime safe)
         device_class = attrs.get("device_class")
-        s._attr_device_class = device_class
+        if device_class is not None:
+            s._attr_device_class = device_class
 
         # Determine state_class:
         # 1) Use source state_class if provided

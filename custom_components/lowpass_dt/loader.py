@@ -141,11 +141,6 @@ async def async_setup_entry_loader(
         create_cfgs: dict[str, LowpassCfg] = {}   # création (filtrée)
         keep_cfgs: dict[str, LowpassCfg] = {}      # existence pure
 
-        # Scan runtime states only (never registry)
-        all_sensor_entities = [
-            st.entity_id for st in hass.states.async_all("sensor")
-        ]
-
         # ------------------------------------------------------------
         # Scan sources
         # ------------------------------------------------------------

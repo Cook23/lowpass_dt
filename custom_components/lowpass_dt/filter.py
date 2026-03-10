@@ -55,7 +55,7 @@ class LowpassCore:
         # -------------------------
         tau = max(0.0, float(self.cfg.tau))
         t_prev = self.t_prev if self.t_prev is not None else now
-        dt = min(max(0.0, now - t_prev), tau)
+        dt = max(0.0, now - t_prev)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
         if self.cfg.circular is None:
@@ -85,22 +85,19 @@ class LowpassCore:
 
         beta = (dt / (tau_s_dynamic + dt)) if (tau_s_dynamic + dt) > 0 else 0.1
 
-        if self.cfg.circular is None or self.src_mean is None:
-            y = self.y
-        else:
-            y = self.src_mean + (
-                (self.y - self.src_mean + self.cfg.circular / 2)
-                % self.cfg.circular
-            ) - self.cfg.circular / 2
-
-        if self.src_mean is None or self.src_m2 is None:
-            self.src_mean = y
-            self.src_m2 = y * y
+        if self.src_mean is None:
+            self.src_mean = self.y
+            self.src_m2 = self.y * self.y
             self.src_var = 0.0
+        elif self.cfg.circular is not None:
+            err = ((self.y - self.src_mean + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
+            self.src_mean = (self.src_mean + beta * err) % self.cfg.circular
+            self.src_var = max((1 - beta) * self.src_var + beta * err * err, 0.0)
         else:
-            self.src_mean = (1 - beta) * self.src_mean + beta * y
-            self.src_m2 = (1 - beta) * self.src_m2 + beta * (y * y)
-            self.src_var = max(self.src_m2 - self.src_mean * self.src_mean, 0.0)
+            self.src_m2 = self.src_var + self.src_mean ** 2
+            self.src_mean = (1 - beta) * self.src_mean + beta * self.y
+            self.src_m2 = (1 - beta) * self.src_m2 + beta * (self.y * self.y)
+            self.src_var = max(self.src_m2 - self.src_mean ** 2, 0.0)
 
         self.src_sigma = math.sqrt(self.src_var)
 
@@ -117,7 +114,7 @@ class LowpassCore:
         # low-pass
         tau = max(0.0, float(self.cfg.tau))
         t_prev = self.t_prev if self.t_prev is not None else now
-        dt = min(max(0.0, now - t_prev), tau)
+        dt = max(0.0, now - t_prev)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
         if self.cfg.circular is None:

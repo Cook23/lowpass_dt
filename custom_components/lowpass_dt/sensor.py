@@ -316,7 +316,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             else:
                 self.hass.loop.call_soon(self.injector._on_silence_detected, None)
         else:
-            _LOGGER.debug("no source or outpup value for %s source=%s", self.entity_id, self.cfg.source)
+            _LOGGER.debug("no source or output value for %s source=%s", self.entity_id, self.cfg.source)
 
 
         _LOGGER.debug("entity added: %s source=%s", self.entity_id, self.cfg.source)
@@ -341,12 +341,10 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # EMA filtered signal
         ema = data.get("ema_source", {})
         core.src_mean = ema.get("src_mean")
-        core.src_m2 = ema.get("src_m2")
+        raw_var = ema.get("src_var")
+        core.src_var = max(float(raw_var), 0.0) if raw_var is not None else 0.0
+        core.src_sigma = core.src_var ** 0.5
         core.t_sigma_start = ema.get("t_sigma_start")
-
-        if core.src_mean is not None and core.src_m2 is not None:
-            core.src_var = max(core.src_m2 - core.src_mean**2, 0.0)
-            core.src_sigma = core.src_var ** 0.5
 
         # EMA dt_source
         dt_src = data.get("ema_dt_source", {})
@@ -379,7 +377,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,
-                "src_m2": self.core.src_m2,
+                "src_var": self.core.src_var,
                 "t_sigma_start": self.core.t_sigma_start,
             },
             "ema_dt_source": {
