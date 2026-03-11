@@ -67,7 +67,7 @@ class Publisher:
             # STOP INJECTOR AFTER FINAL CONVERGENCE PUBLISH
             inj = self.sensor.injector
             inj._stop_injection()
-
+            self.output_just_resumed = True
             return reported
 
         return None
@@ -141,14 +141,7 @@ class Publisher:
         attrs = src_state.attributes or {}
 
         # ------------------------------------------------------------
-        # 4. Detect source resume ignore first dt_output
-        # ------------------------------------------------------------
-        if not injected and getattr(inj, "source_just_resumed", False):
-            self.output_just_resumed = True
-            inj.source_just_resumed = False
-
-        # ------------------------------------------------------------
-        # 5. Compute dt_output
+        # 4. Compute dt_output
         # ------------------------------------------------------------
         if self.core.time_last_pub is None:
             dt_output = None
@@ -156,12 +149,12 @@ class Publisher:
             dt_output = max(0.0, now - self.core.time_last_pub)
 
         # ------------------------------------------------------------
-        # 6. EMA(dt_output)
+        # 5. EMA(dt_output)
         # ------------------------------------------------------------
         dt_output_sigma = self._update_dt_output_stats(dt_output)
 
         # ------------------------------------------------------------
-        # 7. Standard HA fields
+        # 6. Standard HA fields
         # ------------------------------------------------------------
         s._attr_native_unit_of_measurement = attrs.get("unit_of_measurement")
         icon = attrs.get("icon")
@@ -208,7 +201,7 @@ class Publisher:
                     s._attr_state_class = "total_increasing"
 
         # ------------------------------------------------------------
-        # 8. Apply convergence override if needed
+        # 7. Apply convergence override if needed
         # ------------------------------------------------------------
         reported = float(self.core.y)
 
@@ -220,7 +213,7 @@ class Publisher:
             reported = override
 
         # ------------------------------------------------------------
-        # 9. Round reported value (filtered)
+        # 8. Round reported value (filtered)
         # ------------------------------------------------------------
         if self.cfg.rounding is not None:
             decimals = self.cfg.rounding
@@ -230,7 +223,7 @@ class Publisher:
         reported = round(reported, decimals)
 
         # ------------------------------------------------------------
-        # 10. Monoticity
+        # 9. Monoticity
         # ------------------------------------------------------------
 
         prev = s._attr_native_value
@@ -263,7 +256,7 @@ class Publisher:
         s._attr_native_value = reported
 
         # ------------------------------------------------------------
-        # 11. Attributes
+        # 10. Attributes
         # ------------------------------------------------------------
 
         if not self.cfg.debug:
@@ -311,7 +304,7 @@ class Publisher:
             }
 
         # ------------------------------------------------------------
-        # 12. Finalize
+        # 11. Finalize
         # ------------------------------------------------------------
         self.core.finalize_publish(now)
         s.async_write_ha_state()

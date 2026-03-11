@@ -184,6 +184,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 _LOGGER.warning("context lost or new entity for %r (empty filter state).", self.entity_id)
 
         # ------------------------------------------------------------
+        # Exclude HA down time from stats
+        # ------------------------------------------------------------
+        self.injector.source_just_resumed = True
+        self.publisher.output_just_resumed = True
+
+        # ------------------------------------------------------------
         # Rename via registry (deferred, safe)
         # ------------------------------------------------------------
         async def _deferred_rename():

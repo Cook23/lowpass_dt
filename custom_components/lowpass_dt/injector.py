@@ -70,11 +70,10 @@ class TauInjector:
 
         # First measurement after silence: ignore dt
         if self.source_just_resumed:
-            self.t_last_source = t
-            return
-
-        # Update stats
-        self._update_dt_stats(t)
+            self.source_just_resumed = False
+        else:
+            # Update stats
+            self._update_dt_stats(t)
 
         self.t_last_source = t
 
