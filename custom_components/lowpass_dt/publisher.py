@@ -156,12 +156,14 @@ class Publisher:
         # ------------------------------------------------------------
         # 6. Standard HA fields
         # ------------------------------------------------------------
-        s._attr_native_unit_of_measurement = attrs.get("unit_of_measurement")
+        unit = attrs.get("unit_of_measurement")
+        if unit is not None:
+            s._attr_native_unit_of_measurement = unit
+
         icon = attrs.get("icon")
         if icon is not None:
             s._attr_icon = icon
 
-        # Copy device_class (runtime safe)
         device_class = attrs.get("device_class")
         if device_class is not None:
             s._attr_device_class = device_class
@@ -177,8 +179,7 @@ class Publisher:
             s._attr_state_class = state_class
 
         else:
-            # No state_class from source → infer from device_class
-            # Only set it once to avoid HA warnings
+            # No state_class from source → infer from device_class if defined
             if getattr(s, "_attr_state_class", None) is None:
 
                 if device_class in (
@@ -198,7 +199,7 @@ class Publisher:
                     "gas",
                     "water",
                 ):
-                    s._attr_state_class = "total_increasing"
+                    s._attr_state_class = "total"
 
         # ------------------------------------------------------------
         # 7. Apply convergence override if needed

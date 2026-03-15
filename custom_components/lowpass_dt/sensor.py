@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -163,6 +164,20 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._attr_native_value = None
         self._attr_extra_state_attributes = {}
 
+    # ------------------------------------------------------------
+    # Parse source value (numeric extraction with unit detection)
+    # ------------------------------------------------------------
+    def _parse_source_value(self, state_str):
+        """Extract numeric value and optional unit from source state string."""
+        try:
+            return float(state_str), None
+        except Exception:
+            m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*(\S+)?\s*$', state_str)
+            if m:
+                return float(m.group(1)), m.group(2)
+        return None, None
+
+
     async def async_added_to_hass(self) -> None:
         """Restore internal state and register listeners."""
 
@@ -217,10 +232,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         restore_attrs = last_state.attributes if last_state else {}
 
         if src is not None:
-            try:
-                self._last_source_value = float(src.state)
-            except Exception:
-                pass
+            val, unit = self._parse_source_value(src.state)
+            if val is not None:
+                self._last_source_value = val
+                if unit:
+                    self._attr_native_unit_of_measurement = unit
 
         # Source may be unknown/unavailable but attributes can still exist
         source_attrs = {}
@@ -264,19 +280,24 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 pass
             self.core.y = self._attr_native_value
 
+        if self.core.y is None and self._last_source_value is not None:
+            self.core.y = self._last_source_value
+            self._attr_native_value = self._last_source_value
+            
         # ---- SOURCE via EXTRA_STATE ----
         self._attr_extra_state_attributes["source"] = self.cfg.source
 
-        # ---- WRITE IMMEDIATELY IF STRUCTURE EXISTS ----
+        # ---- WRITE IMMEDIATELY IF VALUE OR STRUCTURE EXISTS ----
         if (
             self._attr_native_unit_of_measurement
             or self._attr_state_class
             or self._attr_device_class
+            or self._attr_native_value is not None
         ):
             self.async_write_ha_state()
         else:
             _LOGGER.warning(
-                "restore failed for %r — no structural attributes (restore=%s, source=%s)",
+                "restore failed for %r — no value and no structural attributes (restore=%s, source=%s)",
                 self.entity_id,
                 list(restore_attrs.keys()) if restore_attrs else [],
                 list(source_attrs.keys()) if source_attrs else [],
@@ -409,10 +430,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if new_state is None:
             return
 
-        try:
-            x = float(new_state.state)
-        except Exception:
+        x, unit = self._parse_source_value(new_state.state)
+        if x is None:
             return
+        if unit and not self._attr_native_unit_of_measurement:
+            self._attr_native_unit_of_measurement = unit
 
         now = dt_util.utcnow().timestamp()
 
