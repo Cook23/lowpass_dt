@@ -59,9 +59,12 @@ alpha = dt / (tau + dt)
 y = y + alpha * (x - y)
 ```
 
+The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical.
+
 - No sample-rate dependency.
 - No overshoot. No instability.
 - Acts as a true first-order low-pass filter.
+- Correct behavior after long gaps — no artificial jump on resume.
 
 ---
 
@@ -73,11 +76,14 @@ When a sensor stops publishing for longer than:
 dt_silence = mean(dt) + 3σ
 ```
 
-- Mimics the behavior of a sensor sampled at a constant rate.
-- Synthetic updates are injected using the last known real value until the filter converges smoothly.
-- The final filter output always equals the last real value received before silence.
+The silence threshold is learned automatically from the source's observed update rate. When silence is detected:
 
-No frozen fake values.
+- Synthetic updates are injected at the natural source rate.
+- The filter converges smoothly toward the last known real value.
+- The final published output equals the last real value received before silence.
+- When the source resumes, an end-of-silence marker is published to ensure correct graph representation.
+
+No frozen fake values. No interpolation artifacts.
 
 ---
 
@@ -89,18 +95,21 @@ Optional adaptive deadband:
 deadband = k × sigma(filtered_signal)
 ```
 
-- Keeps only statistically meaningful changes.
-- Eliminates micro-noise.
-- Automatically scales with signal variability.
+The deadband threshold is estimated from the signal's own variability over time. It suppresses noise-induced recorder writes without requiring any manual threshold configuration.
+
+- Self-tuning — adapts to signal noise automatically.
+- Eliminates micro-noise while preserving meaningful variations.
+- Falls back to a fixed deadband if `deadband` is explicitly set.
+- Integral correction ensures slow drifts are still captured even below the threshold.
 
 ---
 
 ### ✔ Recorder-friendly
 
-- Suppresses insignificant updates.
-- Reduces database growth.
+- Suppresses insignificant updates — recorder writes divided by ~10 on typical sensors.
 - Keeps long-term statistics meaningful.
-- Designed for high-frequency sensors.
+- Designed for high-frequency sensors (power, temperature, weather...).
+- Pattern mode allows a single config line to cover dozens of sensors.
 
 ---
 
@@ -189,12 +198,15 @@ This means that a small variation, smaller than the deadband threshold, will sti
 | `max_rate_dt` | float | 10 | Minimum interval between publishes (rate limiter) |
 | `round` | int | auto | Rounding precision for output |
 | `circular` | string | None | Period for circular sensors (`360`, `2pi`, …) |
+| `silence` | string | None | Value published after convergence: `last` (default), `zero`, `unknown` |
 | `debug` | boolean | false | Enable verbose attributes |
 
 A match string should avoid matching already filtered entities. A prefix is added to the generated entity_id to prevent this. Recursion is automatically blocked if a misconfigured match string matches filtered entities. Creation is limited to 100 entities per match string.
 
 `min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
 `max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached.
+
+`silence` controls what value is published after the filter converges during silence. Use `zero` for sensors where silence means the device is off (power, current...) and the source failed to transmit that final zero. Use `unknown` when the value during silence is genuinely indeterminate. For `total` and `total_increasing` sensors this parameter has low effect — the end-of-silence marker is omitted so HA interpolates diagonally, which correctly reflects ongoing accumulation.
 
 ---
 
@@ -214,16 +226,15 @@ A match string should avoid matching already filtered entities. A prefix is adde
 - **Publisher** → Home Assistant state exposure
 - **HA-native restore** → Clean persistence
 
-No polling. Fully event-driven.
+Event-driven, no polling, no background loops.
 
 ---
 
 ## 📈 Performance
 
-- Event driven. No polling.
-- No background loops
+- Event driven, no background loops
 - Injection active only during silence
-- Safe for large sensor sets
+- Fixed cost per update, regardless of sensor count
 
 ---
 

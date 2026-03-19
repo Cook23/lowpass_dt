@@ -1,6 +1,7 @@
 {
   "name": "Lowpass DT",
   "content_in_root": false,
-  "domains": ["integration"],
-  "render_readme": true
+  "category": "integration",
+  "render_readme": true,
+  "homeassistant": "2024.1.0"
 }
