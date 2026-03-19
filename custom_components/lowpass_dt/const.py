@@ -11,6 +11,7 @@ CONF_SUFFIX = "suffix"                            # suffix for generated friendl
 
 CONF_UNIQUE_ID = "unique_id"                      # force unique_id (explicit sensors only)
 CONF_CIRCULAR = "circular"                        # circular censor like 0-360
+CONF_SILENCE = "silence"                          # none or last (for last value) / Zero ou 0 / unknown
 
 CONF_TAU = "tau"                                  # low-pass time constant (seconds)
 CONF_ROUND = "round"                              # rounding precision for output

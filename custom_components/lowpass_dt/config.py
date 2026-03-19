@@ -21,6 +21,7 @@ from .const import (
     CONF_UNIQUE_ID,
     CONF_DEBUG,
     CONF_CIRCULAR,
+    CONF_SILENCE,
     DOMAIN,
 )
 
@@ -47,6 +48,7 @@ class LowpassCfg:
     rounding: int | None
 
     circular: float | None
+    silence: str | None
 
     deadband: float | None
     deadband_k_sigma: float
@@ -198,6 +200,18 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         _LOGGER.warning("Invalid debug=%r, must be true/false, using default False", raw_debug)
         debug = False
 
+    # silence mode
+    raw_silence = item.get(CONF_SILENCE)
+    if raw_silence is None:
+        silence = None
+    else:
+        raw_silence = str(raw_silence).strip().lower()
+        if raw_silence in ("last", "none", "0", "zero", "unknown"):
+            silence = raw_silence
+        else:
+            _LOGGER.warning("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
+            silence = None
+
     return LowpassCfg(
         source=source,
         tau=tau,
@@ -213,6 +227,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         suffix=suffix,
         unique_id=unique_id,
         debug=debug,
+        silence=silence,
     )
 
 

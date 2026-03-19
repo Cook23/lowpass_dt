@@ -35,16 +35,21 @@ class Publisher:
         self.dt_output_m2 = None
 
         # ------------------------------------------------------------
+        # NEW: publish output source value done
+        # ------------------------------------------------------------
+        self.clamped_to_source = False
+
+        # ------------------------------------------------------------
         # NEW: ignore first dt_output after source resumes
         # ------------------------------------------------------------
         self.output_just_resumed = False
 
     # ------------------------------------------------------------
-    # Convergence detection (NO LOGIC CHANGE)
+    # Convergence detection
     # ------------------------------------------------------------
-    def _check_convergence(self, injected, last_src, deadband):
+    def _check_convergence(self, last_src, deadband):
 
-        if not injected or last_src is None:
+        if last_src is None:
             return False
 
         if self.cfg.circular is None:
@@ -58,54 +63,88 @@ class Publisher:
         return abs(err) < deadband
 
     # ------------------------------------------------------------
-    # Apply convergence (NO LOGIC CHANGE)
-    # ------------------------------------------------------------
-    def _apply_convergence_if_needed(self, converged, last_src):
-        if converged:
-            reported = float(last_src)
-
-            # STOP INJECTOR AFTER FINAL CONVERGENCE PUBLISH
-            inj = self.sensor.injector
-            inj._stop_injection()
-            self.output_just_resumed = True
-            return reported
-
-        return None
-
-    # ------------------------------------------------------------
     # EMA helper (unchanged logic)
     # ------------------------------------------------------------
     def _update_dt_output_stats(self, dt_output):
         dt_output_sigma = None
 
-        if dt_output is not None:
-            if self.output_just_resumed:
-                # Ignore first dt_output after source resumes
-                self.output_just_resumed = False
+        if dt_output is not None and not self.output_just_resumed:
+            alpha = 0.1
+
+            if self.dt_output_mean is None or self.dt_output_m2 is None:
+                self.dt_output_mean = dt_output
+                self.dt_output_m2 = dt_output * dt_output
             else:
-                alpha = 0.1
-
-                if self.dt_output_mean is None or self.dt_output_m2 is None:
-                    self.dt_output_mean = dt_output
-                    self.dt_output_m2 = dt_output * dt_output
-                else:
-                    self.dt_output_mean = (
-                        (1 - alpha) * self.dt_output_mean + alpha * dt_output
-                    )
-                    self.dt_output_m2 = (
-                        (1 - alpha) * self.dt_output_m2
-                        + alpha * (dt_output * dt_output)
-                    )
-
-                # Compute sigma
-                var = max(
-                    self.dt_output_m2
-                    - self.dt_output_mean * self.dt_output_mean,
-                    0.0,
+                self.dt_output_mean = (
+                    (1 - alpha) * self.dt_output_mean + alpha * dt_output
                 )
-                dt_output_sigma = math.sqrt(var)
+                self.dt_output_m2 = (
+                    (1 - alpha) * self.dt_output_m2
+                    + alpha * (dt_output * dt_output)
+                )
+
+            # Compute sigma
+            var = max(
+                self.dt_output_m2
+                - self.dt_output_mean * self.dt_output_mean,
+                0.0,
+            )
+            dt_output_sigma = math.sqrt(var)
 
         return dt_output_sigma
+
+    # ------------------------------------------------------------
+    # Decide if a publish should occur
+    # ------------------------------------------------------------
+    def should_publish(self, now):
+        """Decide if we should publish."""
+
+        if self.core.y is None:
+            return False
+
+        if self.core.time_last_pub is None or self.core.last_published is None:
+            return True
+
+        # periodic publish
+        if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
+            if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
+                return True
+
+        # deadband + integral correction
+        deadband_eff = self.core.effective_deadband()
+
+        if self.cfg.circular is None:
+            self.core.err = self.core.y - self.core.last_published
+        else:
+            self.core.err = (
+                (self.core.y - self.core.last_published + self.cfg.circular / 2) % self.cfg.circular
+            ) - self.cfg.circular / 2
+
+        dt = max(0.0, now - self.core.time_last_pub)
+        tau_i = max(1.0, self.cfg.tau)
+        self.core.err_i = (self.core.err * dt) / tau_i
+
+        if abs(self.core.err) >= deadband_eff or abs(self.core.err_i) >= deadband_eff:
+            if self.cfg.max_rate_dt > 0:
+                if (now - self.core.time_last_pub) > self.cfg.max_rate_dt or self.output_just_resumed:
+                    return True
+                else:
+                    if self.core.t_sigma_start is not None:
+                        elapsed = now - self.core.t_sigma_start
+                        if elapsed >= self.cfg.deadband_tau_sigma:
+                            _LOGGER.warning(
+                                "Publish blocked by max_rate_dt=%.1fs for %r (deadband=%.6f, err=%.6f, err_i=%.6f)",
+                                self.cfg.max_rate_dt,
+                                self.cfg.source,
+                                deadband_eff,
+                                self.core.err,
+                                self.core.err_i,
+                            )
+                    return False
+            else:
+                return True
+        else:
+            return False
 
     # ------------------------------------------------------------
     # MAIN PUBLISH
@@ -117,6 +156,9 @@ class Publisher:
         inj = self.sensor.injector
         last_src = s._last_source_value
 
+        if injected:
+            self.output_just_resumed = True
+
         # ------------------------------------------------------------
         # 1. Deadband
         # ------------------------------------------------------------
@@ -125,18 +167,17 @@ class Publisher:
         # ------------------------------------------------------------
         # 2. Convergence detection
         # ------------------------------------------------------------
-        converged = self._check_convergence(
-            injected,
-            last_src,
-            deadband,
-        )
+
+        if injected:
+            converged = self._check_convergence(last_src, deadband)
+        else:
+            converged = False
 
         # ------------------------------------------------------------
         # 3. Publication rule
         # ------------------------------------------------------------
-        if not converged:
-            if not self.core.should_publish(now):
-                return
+        if not force and not converged and not self.should_publish(now):
+            return
 
         attrs = src_state.attributes or {}
 
@@ -201,17 +242,26 @@ class Publisher:
                 ):
                     s._attr_state_class = "total"
 
+
         # ------------------------------------------------------------
-        # 7. Apply convergence override if needed
-        # ------------------------------------------------------------
+
         reported = float(self.core.y)
 
-        override = self._apply_convergence_if_needed(
-            converged,
-            last_src,
-        )
-        if override is not None:
-            reported = override
+        # ------------------------------------------------------------
+        # 7. Apply override if needed
+        # ------------------------------------------------------------
+
+        was_clamped_to_source = self.clamped_to_source
+        if converged:
+            reported = float(last_src)
+            self.clamped_to_source = True
+            if self.cfg.silence not in ("zero", "0", "unknown"):
+                inj._stop_injection()
+                self.output_just_resumed = True
+                self.clamped_to_source = False
+
+        if force:
+            reported = float(last_src)
 
         # ------------------------------------------------------------
         # 8. Round reported value (filtered)
@@ -224,16 +274,30 @@ class Publisher:
         reported = round(reported, decimals)
 
         # ------------------------------------------------------------
-        # 9. Monoticity
+        # 9. Hack to force record to recorder
+        # ------------------------------------------------------------
+
+        if force:
+            if self.cfg.silence == "unknown":
+                reported = 0.0
+            elif self.cfg.silence in ("zero", "0"):
+                reported = 10 ** (-decimals-1)
+            else:
+                reported = reported + 10 ** (-decimals-1)
+
+            _LOGGER.debug(
+                "end-of-silence marker in publisher for %s last_source_value=%f",
+                s.entity_id,
+                reported,
+            )
+
+        # ------------------------------------------------------------
+        # 10. Monoticity
         # ------------------------------------------------------------
 
         prev = s._attr_native_value
 
-        if (
-            s._attr_state_class == "total_increasing"
-            and prev is not None
-            and reported < prev
-        ):
+        if (s._attr_state_class == "total_increasing" and prev is not None and reported < prev):
             if getattr(self.sensor, "_reset_pending", False):
 
                 _LOGGER.warning(
@@ -254,10 +318,31 @@ class Publisher:
 
                 return
 
-        s._attr_native_value = reported
 
         # ------------------------------------------------------------
-        # 10. Attributes
+        # 11. Unknown / Zero
+        # ------------------------------------------------------------
+
+        if was_clamped_to_source and self.cfg.silence in ("zero", "0", "unknown"):
+            if self.cfg.silence in ("zero", "0") and s._attr_state_class not in ("total", "total_increasing"):
+                s._attr_native_value = 0.0
+            else:
+                s._attr_native_value = None
+            inj._stop_injection()
+            self.output_just_resumed = True
+            self.clamped_to_source = False
+        else:
+            s._attr_native_value = reported
+
+        # ------------------------------------------------------------
+        # 12. Reset output_just_resumed after successful real publish
+        # ------------------------------------------------------------
+
+        if not injected and not force:
+            self.output_just_resumed = False
+
+        # ------------------------------------------------------------
+        # 13. Attributes
         # ------------------------------------------------------------
 
         if not self.cfg.debug:
@@ -282,7 +367,7 @@ class Publisher:
                 "source_dt": {
                     "source_dt": dt,
                     "source_silence_3sigma": self.dt_silence,
-                    "silent": inj.silent,
+                    "silent": self.output_just_resumed,
                 },
 
                 "deadband": {
@@ -305,7 +390,7 @@ class Publisher:
             }
 
         # ------------------------------------------------------------
-        # 11. Finalize
+        # 14. Finalize
         # ------------------------------------------------------------
         self.core.finalize_publish(now)
         s.async_write_ha_state()

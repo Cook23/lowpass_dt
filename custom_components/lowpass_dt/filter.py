@@ -139,62 +139,6 @@ class LowpassCore:
         return max(0.001, float(self.cfg.deadband_k_sigma) * sigma)
 
     # ------------------------------------------------------------
-    # Decide if a publish should occur
-    # ------------------------------------------------------------
-    def should_publish(self, now):
-        """Decide if we should publish."""
-
-        if self.y is None:
-            return False
-
-        if self.time_last_pub is None or self.last_published is None:
-            return True
-
-        # periodic publish
-        if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
-            if (now - self.time_last_pub) > self.cfg.min_rate_dt:
-                return True
-
-        # deadband + integral correction
-        deadband_eff = self.effective_deadband()
-
-        if self.cfg.circular is None:
-            self.err = self.y - self.last_published
-        else:
-            self.err = (
-                (self.y - self.last_published + self.cfg.circular / 2) % self.cfg.circular
-            ) - self.cfg.circular / 2
-
-        dt = max(0.0, now - self.time_last_pub)
-        tau_i = max(1.0, self.cfg.tau)
-        self.err_i = (self.err * dt) / tau_i
-
-        if abs(self.err) >= deadband_eff or abs(self.err_i) >= deadband_eff:
-
-            if self.cfg.max_rate_dt > 0:
-                if (now - self.time_last_pub) > self.cfg.max_rate_dt:
-                    return True
-                else:
-                    if self.t_sigma_start is not None:
-                        elapsed = now - self.t_sigma_start
-                        if elapsed >= self.cfg.deadband_tau_sigma:
-                            _LOGGER.warning(
-                                "Publish blocked by max_rate_dt=%.1fs for %r (deadband=%.6f, err=%.6f, err_i=%.6f)",
-                                self.cfg.max_rate_dt,
-                                self.cfg.source,
-                                deadband_eff,
-                                self.err,
-                                self.err_i,
-                            )
-                    return False
-            else:
-                return True
-        else:
-            return False
-
-        return True
-
-    # ------------------------------------------------------------
     # Finalize publish (update internal state)
     # ------------------------------------------------------------
     def finalize_publish(self, now):

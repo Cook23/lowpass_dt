@@ -451,11 +451,28 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
             self._reset_pending = True
 
+        # Publish end-of-silence marker before source resumes
+        if self.injector.silent and self._last_source_value is not None and self._attr_state_class not in ("total", "total_increasing"):
+            marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0
+            self.publisher.publish(
+                new_state,
+                now-0.1,
+                marker_dt,
+                force=True,
+                injected=False,
+            )
+            _LOGGER.debug(
+                "end-of-silence marker in sensor for %s last_source_value=%f",
+                self.entity_id,
+                self._last_source_value,
+            )
+
         # Update last source value
         self._last_source_value = x
 
         # Update dt stats + stop injector
         self.injector.set_last_source_time(now)
+        self.publisher.clamped_to_source = False
 
         # Update filter with real measurement
         dt = self.core.update_from_source(x, now)

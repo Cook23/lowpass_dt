@@ -111,7 +111,7 @@ class TauInjector:
         if self.dt_mean is not None and self.dt_m2 is not None:
             var = max(self.dt_m2 - self.dt_mean ** 2, 0.0)
             std = math.sqrt(var)
-            self.dt_silence_raw = self.dt_mean + 3.0 * std
+            self.dt_silence_raw = self.dt_mean + 3.0 * std + 0.1
             self.limit = max(min(self.dt_silence_raw, tau), 1.0)
             self.interval = max(min(self.dt_mean, tau), 1.0)
         else:
