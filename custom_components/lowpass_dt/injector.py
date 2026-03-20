@@ -68,16 +68,11 @@ class TauInjector:
             self.unsub_silence()
             self.unsub_silence = None
 
-        # First measurement after silence: ignore dt
+        # First measurement after silence: use limit dt_silence
         if self.source_just_resumed:
-            if self.limit is not None and self.limit > 0:
-                if self.dt_mean is None:
-                    self.t_last_source = t - self.limit
-                else:
-                    self.t_last_source = t - 2 * self.limit
-                self._update_dt_stats(t)
-        else:
-            self._update_dt_stats(t)
+            self.t_last_source = t - self.limit
+
+        self._update_dt_stats(t)
 
         self.source_just_resumed = False
         self.t_last_source = t
