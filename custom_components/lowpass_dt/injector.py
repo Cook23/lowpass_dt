@@ -70,11 +70,16 @@ class TauInjector:
 
         # First measurement after silence: ignore dt
         if self.source_just_resumed:
-            self.source_just_resumed = False
+            if self.limit is not None and self.limit > 0:
+                if self.dt_mean is None:
+                    self.t_last_source = t - self.limit
+                else:
+                    self.t_last_source = t - 2 * self.limit
+                self._update_dt_stats(t)
         else:
-            # Update stats
             self._update_dt_stats(t)
 
+        self.source_just_resumed = False
         self.t_last_source = t
 
         # Schedule new silence detection
@@ -107,7 +112,7 @@ class TauInjector:
     # ------------------------------------------------------------
     def _compute_limits(self):
         tau = float(self.cfg.tau)
-    
+
         if self.dt_mean is not None and self.dt_m2 is not None:
             var = max(self.dt_m2 - self.dt_mean ** 2, 0.0)
             std = math.sqrt(var)
