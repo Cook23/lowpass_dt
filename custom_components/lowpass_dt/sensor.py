@@ -99,6 +99,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # ------------------------------------------------------------
         # Decide name_final, slug, use_name_mode
         # ------------------------------------------------------------
+        object_id_src = (
+            cfg.source.split(".", 1)[1]
+            if "." in cfg.source
+            else cfg.source
+        )
+
         if precomputed is not None:
             name_final = precomputed.name_final
             slug = precomputed.slug
@@ -123,11 +129,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             if getattr(cfg, "unique_id", None):
                 seed = cfg.unique_id
             else:
-                object_id_src = (
-                    cfg.source.split(".", 1)[1]
-                    if "." in cfg.source
-                    else cfg.source
-                )
                 seed = f"{cfg.prefix}{object_id_src}"
 
             self._unique_id_seed = seed
@@ -139,11 +140,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if use_name:
             object_id = slug
         else:
-            object_id_src = (
-                cfg.source.split(".", 1)[1]
-                if "." in cfg.source
-                else cfg.source
-            )
             object_id = f"{cfg.prefix}{object_id_src}"
 
         self._attr_suggested_object_id = object_id
@@ -178,11 +174,14 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         return None, None
 
 
+    # ------------------------------------------------------------
+    # Add to HA
+    # ------------------------------------------------------------
     async def async_added_to_hass(self) -> None:
         """Restore internal state and register listeners."""
 
         # ------------------------------------------------------------
-        # NEW HA-native restore
+        # HA-native restore
         # ------------------------------------------------------------
 
         await super().async_added_to_hass()
@@ -339,7 +338,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # simulate silence timer expiration after restore
         if self.core.y is not None and self._last_source_value is not None:
             if self.injector.dt_mean is not None:
-                self.injector._schedule_silence_timer()
+                self.injector.restart_silence_timer()
             else:
                 self.hass.loop.call_soon(self.injector._on_silence_detected, None)
         else:
@@ -347,6 +346,19 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
 
         _LOGGER.debug("entity added: %s source=%s", self.entity_id, self.cfg.source)
+
+    # ------------------------------------------------------------
+    # Remove from HA
+    # ------------------------------------------------------------
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup listeners and timers on unload."""
+        if self._unsub_source:
+            self._unsub_source()
+            self._unsub_source = None
+        if self._unsub_name:
+            self._unsub_name()
+            self._unsub_name = None
+        self.injector.stop()
 
     # ------------------------------------------------------------
     # Restore internal engine state (HA-native)
@@ -383,6 +395,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         dt_out = data.get("ema_dt_output", {})
         pub.dt_output_mean = dt_out.get("dt_output_mean")
         pub.dt_output_m2 = dt_out.get("dt_output_m2")
+        pub.decimals = dt_out.get("decimals")
 
         # Restaure Limit and Interval
         if inj.dt_mean is not None and inj.dt_m2 is not None:
@@ -415,6 +428,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             "ema_dt_output": {
                 "dt_output_mean": self.publisher.dt_output_mean,
                 "dt_output_m2": self.publisher.dt_output_m2,
+                "decimals": self.publisher.decimals,
             },
         }
 

@@ -36,11 +36,17 @@ class TauInjector:
         # Explicit silence state
         self.silent = False
 
+        # Manage unload
+        self._stopped = False
+
     # ------------------------------------------------------------
     # Public cleanup
     # ------------------------------------------------------------
     def stop(self):
         """Stop all timers (safe to call multiple times)."""
+        
+        self._stopped = True
+        
         if self.unsub_silence is not None:
             self.unsub_silence()
             self.unsub_silence = None
@@ -58,7 +64,7 @@ class TauInjector:
         """Record timestamp of last real source update and update dt stats."""
 
         # Stop injector immediately when source speaks
-        self._stop_injection()
+        self.stop_injection()
 
         # End of silence
         self.silent = False
@@ -78,7 +84,7 @@ class TauInjector:
         self.t_last_source = t
 
         # Schedule new silence detection
-        self._schedule_silence_timer()
+        self.hass.loop.call_soon(self.restart_silence_timer)
 
     # ------------------------------------------------------------
     # Update EMA stats for dt_source (NO LOGIC CHANGE)
@@ -121,7 +127,9 @@ class TauInjector:
     # ------------------------------------------------------------
     # Schedule silence one-shot
     # ------------------------------------------------------------
-    def _schedule_silence_timer(self):
+    def restart_silence_timer(self):
+        if self._stopped or self.unsub_silence is not None:
+            return
         self.unsub_silence = async_call_later(
             self.hass,
             self.limit,
@@ -139,7 +147,7 @@ class TauInjector:
         self._inject_once()
 
         # Start periodic injection
-        self._start_periodic_injection()
+        self.hass.loop.call_soon(self._start_periodic_injection)
 
     # ------------------------------------------------------------
     # Inject once (NO LOGIC CHANGE)
@@ -147,6 +155,9 @@ class TauInjector:
     def _inject_once(self):
         now = dt_util.utcnow().timestamp()
         last_source_value = self.get_last_source()
+
+        if self._stopped:
+            return
 
         if last_source_value is None:
             return
@@ -164,6 +175,8 @@ class TauInjector:
     # Start periodic injection
     # ------------------------------------------------------------
     def _start_periodic_injection(self):
+        if self._stopped or not self.silent:
+            return
         self.unsub_injection = async_track_time_interval(
             self.hass,
             self._tick,
@@ -173,7 +186,7 @@ class TauInjector:
     # ------------------------------------------------------------
     # Stop periodic injection
     # ------------------------------------------------------------
-    def _stop_injection(self):
+    def stop_injection(self):
         if self.unsub_injection is not None:
             self.unsub_injection()
             self.unsub_injection = None
@@ -186,7 +199,7 @@ class TauInjector:
         """Inject synthetic updates while silence persists."""
 
         if not self.silent:
-            self._stop_injection()
+            self.stop_injection()
             return
 
         self._inject_once()

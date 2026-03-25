@@ -6,17 +6,24 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
-# Utility: derive rounding precision from fixed deadband
+# Utility: derive rounding precision from fixed deadband with histeresis
 # ------------------------------------------------------------
-def _default_round_from_deadband(deadband: float | None) -> int:
-    """Derive display rounding from fixed deadband."""
-    if deadband is not None and deadband >= 10:
-        return 0
-    if deadband is not None and deadband >= 1:
-        return 1
+def _update_decimals(deadband: float | None, current_decimals: int | None) -> int:
     if deadband is None or deadband <= 0:
-        return 2
-    return min(6, max(0, int(math.ceil(-math.log10(deadband))) + 1))
+        return current_decimals if current_decimals is not None else 2
+
+    if current_decimals is None:
+        return min(6, max(0, int(math.ceil(-math.log10(deadband))) + 1))
+
+    threshold_up = 10 ** (-(current_decimals - 1 + 0.5))
+    if deadband < threshold_up:
+        return min(6, current_decimals + 1)
+
+    threshold_down = 10 ** (-(current_decimals - 1 - 0.5))
+    if deadband > threshold_down:
+        return max(0, current_decimals - 1)
+
+    return current_decimals
 
 
 class Publisher:
@@ -28,21 +35,14 @@ class Publisher:
         self.core = core
         self.dt_silence = None  # storage for dt_silence passed by sensor
 
-        # ------------------------------------------------------------
-        # NEW: EMA for dt_output
-        # ------------------------------------------------------------
+        # EMA for dt_output
         self.dt_output_mean = None
         self.dt_output_m2 = None
 
-        # ------------------------------------------------------------
-        # NEW: publish output source value done
-        # ------------------------------------------------------------
         self.clamped_to_source = False
-
-        # ------------------------------------------------------------
-        # NEW: ignore first dt_output after source resumes
-        # ------------------------------------------------------------
         self.output_just_resumed = False
+
+        self.decimals = None
 
     # ------------------------------------------------------------
     # Convergence detection
@@ -256,7 +256,7 @@ class Publisher:
             reported = float(last_src)
             self.clamped_to_source = True
             if self.cfg.silence not in ("zero", "0", "unknown"):
-                inj._stop_injection()
+                inj.stop_injection()
                 self.output_just_resumed = True
                 self.clamped_to_source = False
 
@@ -269,8 +269,9 @@ class Publisher:
         if self.cfg.rounding is not None:
             decimals = self.cfg.rounding
         else:
-            decimals = _default_round_from_deadband(deadband)
-
+            self.decimals = _update_decimals(deadband, self.decimals)
+            decimals = self.decimals
+            
         reported = round(reported, decimals)
 
         # ------------------------------------------------------------
@@ -298,7 +299,7 @@ class Publisher:
         prev = s._attr_native_value
 
         if (s._attr_state_class == "total_increasing" and prev is not None and reported < prev):
-            if getattr(self.sensor, "_reset_pending", False):
+            if self.sensor._reset_pending:
 
                 _LOGGER.warning(
                     "total_increasing monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
@@ -328,7 +329,7 @@ class Publisher:
                 s._attr_native_value = 0.0
             else:
                 s._attr_native_value = None
-            inj._stop_injection()
+            inj.stop_injection()
             self.output_just_resumed = True
             self.clamped_to_source = False
         else:
