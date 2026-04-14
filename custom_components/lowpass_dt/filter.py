@@ -20,8 +20,6 @@ class LowpassCore:
         self.src_sigma = None
         self.src_m2 = None
 
-        # last published (unrounded)
-        self.last_published = None
         self.time_last_pub = None
 
         # error for deadband
@@ -138,25 +136,4 @@ class LowpassCore:
         sigma = float(self.src_sigma) if self.src_sigma is not None else 0.0
         return max(0.001, float(self.cfg.deadband_k_sigma) * sigma)
 
-    # ------------------------------------------------------------
-    # Finalize publish (update internal state)
-    # ------------------------------------------------------------
-    def finalize_publish(self, now):
-        self.last_published = self.y
-        self.time_last_pub = now
 
-    # ------------------------------------------------------------
-    # Persistence: export minimal state
-    # ------------------------------------------------------------
-    def export_state(self):
-        return {
-            "last_published": self.last_published,
-            "time_last_pub": self.time_last_pub,
-        }
-
-    # ------------------------------------------------------------
-    # Persistence: import minimal state
-    # ------------------------------------------------------------
-    def import_state(self, state):
-        self.last_published = state.get("last_published")
-        self.time_last_pub = state.get("time_last_pub")

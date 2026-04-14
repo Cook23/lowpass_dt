@@ -96,28 +96,25 @@ class Publisher:
     # ------------------------------------------------------------
     # Decide if a publish should occur
     # ------------------------------------------------------------
-    def should_publish(self, now):
+    def should_publish(self, now, marker=False):
         """Decide if we should publish."""
 
         if self.core.y is None:
             return False
 
-        if self.core.time_last_pub is None or self.core.last_published is None:
-            return True
-
-        # periodic publish
-        if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
-            if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
+        if self.core.time_last_pub is None or self.sensor._attr_native_value is None:
+            if not marker:
                 return True
+            return False
 
         # deadband + integral correction
         deadband_eff = self.core.effective_deadband()
 
         if self.cfg.circular is None:
-            self.core.err = self.core.y - self.core.last_published
+            self.core.err = self.core.y - self.sensor._attr_native_value
         else:
             self.core.err = (
-                (self.core.y - self.core.last_published + self.cfg.circular / 2) % self.cfg.circular
+                (self.core.y - self.sensor._attr_native_value + self.cfg.circular / 2) % self.cfg.circular
             ) - self.cfg.circular / 2
 
         dt = max(0.0, now - self.core.time_last_pub)
@@ -144,7 +141,13 @@ class Publisher:
             else:
                 return True
         else:
-            return False
+            # periodic publish
+            if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
+                if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
+                    if not marker:
+                        return True
+
+        return False
 
     # ------------------------------------------------------------
     # MAIN PUBLISH
@@ -335,6 +338,7 @@ class Publisher:
         else:
             s._attr_native_value = reported
 
+
         # ------------------------------------------------------------
         # 12. Reset output_just_resumed after successful real publish
         # ------------------------------------------------------------
@@ -393,7 +397,7 @@ class Publisher:
         # ------------------------------------------------------------
         # 14. Finalize
         # ------------------------------------------------------------
-        self.core.finalize_publish(now)
+        self.core.time_last_pub = now
         s.async_write_ha_state()
 
     # ------------------------------------------------------------

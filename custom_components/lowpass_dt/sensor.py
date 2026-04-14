@@ -282,7 +282,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if self.core.y is None and self._last_source_value is not None:
             self.core.y = self._last_source_value
             self._attr_native_value = self._last_source_value
-            
+
         # ---- SOURCE via EXTRA_STATE ----
         self._attr_extra_state_attributes["source"] = self.cfg.source
 
@@ -375,7 +375,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.t_prev = lp.get("t_prev")
         core.time_last_pub = lp.get("time_last_pub")
         core.err_i = lp.get("err_i", 0.0)
-        core.last_published = lp.get("last_published")
 
         # EMA filtered signal
         ema = data.get("ema_source", {})
@@ -413,7 +412,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "t_prev": self.core.t_prev,
                 "time_last_pub": self.core.time_last_pub,
                 "err_i": self.core.err_i,
-                "last_published": self.core.last_published,
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,
@@ -459,14 +457,19 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
             # Hard reset of filter state
             self.core.y = x
-            self.core.last_published = x
             self.core.err_i = 0.0
             self.core.t_prev = now
 
             self._reset_pending = True
 
+        # Update filter with real measurement
+        dt = self.core.update_from_source(x, now)
+
+        # PASS dt_silence_raw TO PUBLISHER
+        self.publisher.dt_silence = self.injector.dt_silence_raw
+
         # Publish end-of-silence marker before source resumes
-        if self.injector.silent and self._last_source_value is not None and self._attr_state_class not in ("total", "total_increasing"):
+        if self.injector.silent and self._last_source_value is not None and self._attr_state_class not in ("total", "total_increasing") and self.publisher.should_publish(now, marker=True):
             marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0
             self.publisher.publish(
                 new_state,
@@ -481,18 +484,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self._last_source_value,
             )
 
-        # Update last source value
-        self._last_source_value = x
-
         # Update dt stats + stop injector
         self.injector.set_last_source_time(now)
         self.publisher.clamped_to_source = False
 
-        # Update filter with real measurement
-        dt = self.core.update_from_source(x, now)
-
-        # PASS dt_silence_raw TO PUBLISHER
-        self.publisher.dt_silence = self.injector.dt_silence_raw
+        # Update last source value
+        self._last_source_value = x
 
         # Publish real measurement
         self.publisher.publish(
