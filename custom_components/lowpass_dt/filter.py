@@ -13,6 +13,7 @@ class LowpassCore:
         # filter state
         self.y = None
         self.t_prev = None
+        self.x_prev = None
 
         # stats (always computed for transparency)
         self.src_mean = None
@@ -38,6 +39,7 @@ class LowpassCore:
         if self.y is None:
             self.y = x
             self.t_prev = now
+            self.x_prev = x
             self.t_sigma_start = now
 
             # Always initialize stats
@@ -56,15 +58,18 @@ class LowpassCore:
         dt = max(0.0, now - t_prev)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
 
+        # Zero-order hold (ZOH): dt[n] is the duration during which x_prev
+        # (not the newly arrived x) was the actual value of the signal.
         if self.cfg.circular is None:
-            self.y = self.y + alpha * (x - self.y)
+            self.y = self.y + alpha * (self.x_prev - self.y)
         else:
             self.y = (
                 self.y
-                + alpha * (((x - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
+                + alpha * (((self.x_prev - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
             ) % self.cfg.circular
 
         self.t_prev = now
+        self.x_prev = x
 
         # -------------------------
         # EMA of filtered signal

@@ -222,7 +222,7 @@ async def async_setup_entry_loader(
             if entity.platform != DOMAIN:
                 continue
 
-            # retrouver la source depuis unique_id
+            # find the source entity from unique_id
             if entity.unique_id not in keep_unique_ids:
                 _LOGGER.warning("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
                 reg.async_remove(entity.entity_id)

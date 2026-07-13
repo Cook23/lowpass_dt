@@ -17,7 +17,7 @@ from .const import DOMAIN
 from .config import (
     LowpassCfg,
     CfgMeta,
-    compute_name_and_slug,
+    make_meta,
 )
 
 from .filter import LowpassCore
@@ -105,34 +105,21 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             else cfg.source
         )
 
-        if precomputed is not None:
-            name_final = precomputed.name_final
-            slug = precomputed.slug
-            use_name = precomputed.use_name
+        # Fallback path (should rarely happen): delegate to make_meta(),
+        # the single source of truth also used by loader.py, instead of
+        # re-deriving name/slug/unique_id locally.
+        meta = precomputed if precomputed is not None else make_meta(
+            hass,
+            cfg,
+            is_pattern=is_pattern,
+        )
 
-            # ------------------------------------------------------------
-            # UNIQUE_ID (NEW RULE – already computed in make_meta)
-            # ------------------------------------------------------------
-            self._attr_unique_id = precomputed.unique_id
-            self._unique_id_seed = precomputed.unique_id_seed
+        name_final = meta.name_final
+        slug = meta.slug
+        use_name = meta.use_name
 
-        else:
-            name_final, slug, use_name = compute_name_and_slug(
-                hass,
-                cfg,
-                is_pattern,
-            )
-
-            # ------------------------------------------------------------
-            # UNIQUE_ID (fallback path – should rarely happen)
-            # ------------------------------------------------------------
-            if getattr(cfg, "unique_id", None):
-                seed = cfg.unique_id
-            else:
-                seed = f"{cfg.prefix}{object_id_src}"
-
-            self._unique_id_seed = seed
-            self._attr_unique_id = f"{DOMAIN}::{seed}"
+        self._attr_unique_id = meta.unique_id
+        self._unique_id_seed = meta.unique_id_seed
 
         # ------------------------------------------------------------
         # ENTITY_ID / suggested_object_id
@@ -396,7 +383,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         pub.dt_output_m2 = dt_out.get("dt_output_m2")
         pub.decimals = dt_out.get("decimals")
 
-        # Restaure Limit and Interval
+        # Restore limit and interval
         if inj.dt_mean is not None and inj.dt_m2 is not None:
             inj._compute_limits()
 
