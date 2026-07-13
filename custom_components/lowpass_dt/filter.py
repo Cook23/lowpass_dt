@@ -57,15 +57,16 @@ class LowpassCore:
         t_prev = self.t_prev if self.t_prev is not None else now
         dt = max(0.0, now - t_prev)
         alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
+        x_prev = self.x_prev if self.x_prev is not None else self.y
 
         # Zero-order hold (ZOH): dt[n] is the duration during which x_prev
         # (not the newly arrived x) was the actual value of the signal.
         if self.cfg.circular is None:
-            self.y = self.y + alpha * (self.x_prev - self.y)
+            self.y = self.y + alpha * (x_prev - self.y)
         else:
             self.y = (
                 self.y
-                + alpha * (((self.x_prev - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
+                + alpha * (((x_prev - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
             ) % self.cfg.circular
 
         self.t_prev = now

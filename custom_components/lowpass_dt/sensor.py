@@ -360,6 +360,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         lp = data.get("low_pass", {})
         core.y = lp.get("y")
         core.t_prev = lp.get("t_prev")
+        core.x_prev = lp.get("x_prev")
         core.time_last_pub = lp.get("time_last_pub")
         core.err_i = lp.get("err_i", 0.0)
 
@@ -397,6 +398,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             "low_pass": {
                 "y": self.core.y,
                 "t_prev": self.core.t_prev,
+                "x_prev": self.core.x_prev,
                 "time_last_pub": self.core.time_last_pub,
                 "err_i": self.core.err_i,
             },
@@ -444,6 +446,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
             # Hard reset of filter state
             self.core.y = x
+            self.core.x_prev = x
             self.core.err_i = 0.0
             self.core.t_prev = now
 
