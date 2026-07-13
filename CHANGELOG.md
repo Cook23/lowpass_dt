@@ -8,6 +8,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ## v1.3.15
 
+### Fixed
+
+- **End-of-silence marker firing without a real silence.** The marker introduced in v1.3.14 was gated only on the silence timer having expired, not on whether the output had actually had time to converge to the frozen source value. With a short `tau` relative to the source's real update rate, the timer could expire and the source resume again before a single injection had meaningfully moved the filtered output — the marker still fired, publishing the raw source value even though the output was nowhere near it. This showed up as a brief, incorrect spike/dip in the filtered curve (reported as [#3](https://github.com/Cook23/lowpass_dt/issues/3) by [@capeleiro](https://github.com/capeleiro)). The marker now also requires the output to have converged to the last known source value (using the same convergence check already used for injected updates) before firing — if the source resumes before convergence, there was never a real flat plateau to mark, so none is published.
+
 ### Changed
 
 - **Zero-order hold (ZOH) time-aware integration.** The low-pass filter now applies `dt[n]` to the *previous* known value (`x[n-1]`) instead of the newly arrived one (`x[n]`):
