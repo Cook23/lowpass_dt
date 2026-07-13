@@ -1,12 +1,44 @@
-# Lowpass DT – Deterministic Time-Aware Filter for Home Assistant
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![GitHub release](https://img.shields.io/github/v/release/Cook23/lowpass_dt?style=for-the-badge)](https://github.com/Cook23/lowpass_dt/releases)
+[![GitHub stars](https://img.shields.io/github/stars/Cook23/lowpass_dt?style=for-the-badge)](https://github.com/Cook23/lowpass_dt/stargazers)
+![Experimental](https://img.shields.io/badge/status-experimental-yellow?style=for-the-badge)
+![Math Driven](https://img.shields.io/badge/design-math%20driven-black?style=for-the-badge)
 
-![HACS](https://img.shields.io/badge/HACS-Custom-blue.svg)
-![Experimental](https://img.shields.io/badge/status-experimental-orange)
-![Math Driven](https://img.shields.io/badge/design-math%20driven-black)
+<a href="https://buymeacoffee.com/thierry_couquillou" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
+
+# Lowpass DT – Deterministic Time-Aware Filter for Home Assistant
 
 > ⚠️ **Experimental – tested by exactly one person: me.**
 > Works well in my environment. May break yours. Back up Home Assistant before installing.
 > Extensive logging is intentional during this validation phase and will be reduced in future stable versions.
+
+---
+
+## 📋 Version highlights
+
+A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
+
+- **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
+- **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
+
+---
+
+## 📑 Table of contents
+
+- [Version highlights](#version-highlights)
+- [Objective](#objective)
+- [Why This Exists](#why-this-exists)
+- [What Makes It Different](#what-makes-it-different)
+- [Install](#install)
+- [Configuration](#configuration)
+- [Fine-Tuning](#fine-tuning)
+- [Parameters](#parameters)
+- [Architecture](#architecture)
+- [Performance](#performance)
+- [Known Limitations](#known-limitations)
+- [License](#license)
+- [Author](#author)
+- [References](#references)
 
 ---
 
@@ -50,21 +82,25 @@ This component does.
 
 ## 🧠 What Makes It Different
 
-### ✔ Time-aware integration (Δt-based)
+### ✔ Time-aware integration (Δt-based, zero-order hold)
 
 Handles irregular update intervals correctly:
 
 ```
-alpha = dt / (tau + dt)
-y = y + alpha * (x - y)
+dt[n]    = t[n] - t[n-1]
+alpha[n] = dt[n] / (tau + dt[n])
+y[n]     = y[n-1] + alpha[n] * (x[n-1] - y[n-1])
 ```
 
 The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical.
+
+The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the time that has just elapsed — is applied to `x[n-1]`, the value that was actually in effect during that interval, not to the newly arrived `x[n]`. The new sample only becomes "the value in effect" for the *next* interval. This matters for sparse or impulsive signals: a short-lived spike arriving after a long silence is not mistakenly weighted as if it had lasted the whole preceding interval. The trade-off is a one-sample delay, which is negligible for continuous, regularly-sampled signals and only becomes visible on sparse, spiky sources — exactly the case it was designed to fix.
 
 - No sample-rate dependency.
 - No overshoot. No instability.
 - Acts as a true first-order low-pass filter.
 - Correct behavior after long gaps — no artificial jump on resume.
+- Correct time attribution for irregularly sampled, impulsive signals.
 
 ---
 
@@ -110,6 +146,26 @@ The deadband threshold is estimated from the signal's own variability over time.
 - Keeps long-term statistics meaningful.
 - Designed for high-frequency sensors (power, temperature, weather...).
 - Pattern mode allows a single config line to cover dozens of sensors.
+
+---
+
+## 📦 Install
+
+### HACS (recommended)
+
+Add this repository as a **custom repository** in HACS: `https://github.com/Cook23/lowpass_dt`
+
+1. HACS → ⋮ (top right) → Custom repositories
+2. Repository: `https://github.com/Cook23/lowpass_dt`
+3. Category: **Integration**
+4. Install
+5. Restart Home Assistant
+
+### Manual install
+
+1. Download this repository
+2. Copy the `lowpass_dt` folder into `config/custom_components/`
+3. Restart Home Assistant
 
 ---
 
@@ -210,18 +266,9 @@ A match string should avoid matching already filtered entities. A prefix is adde
 
 ---
 
-## 📦 Installation (HACS)
-
-1. Add this repository as a **Custom Repository** in HACS
-2. Category: **Integration**
-3. Install
-4. Restart Home Assistant
-
----
-
 ## 🏗 Architecture
 
-- **LowpassCore** → Pure math engine
+- **LowpassCore** → Pure math engine (Δt-aware, zero-order hold, adaptive sigma, deadband)
 - **TauInjector** → Silence detection & injection
 - **Publisher** → Home Assistant state exposure
 - **HA-native restore** → Clean persistence
@@ -267,6 +314,15 @@ So yes, errors and mistakes are absolutely possible. Please be kind.
 
 ## References
 
+### Zero-Order Hold and Correct Time Attribution
+
+Applying `dt[n]` to `x[n-1]` instead of `x[n]` is a standard **zero-order hold (ZOH)** reconstruction: between two samples, the only value actually known to have been in effect is the previous one. This avoids attributing the full preceding interval's weight to a value that has only just arrived — a bias that is invisible on smooth, densely-sampled signals but significant on sparse or impulsive ones (short spikes, event-driven sensors, long gaps followed by a brief excursion).
+
+This is closely related to:
+
+- **Zero-Order Hold (ZOH) reconstruction**, as used in sampled-data and digital control systems
+- **Causal filtering** — the filter output at time `t[n]` never depends on information only available after `t[n-1]`
+
 ### Adaptive Delta Encoding for Gaussian Noise
 
 This filter implements a form of **adaptive delta encoding** (also known as *send-on-delta* or *level-crossing sampling*) optimized for Gaussian noise environments.
@@ -291,3 +347,4 @@ This approach is closely related to:
 - Rice, S. O. (1944–1945). *Mathematical Analysis of Random Noise*. Bell System Technical Journal.
 - Proakis, J. G., & Salehi, M. *Digital Communications*. McGraw-Hill.
 - Gubner, J. A. *Probability and Random Processes for Electrical and Computer Engineers*. Cambridge University Press.
+- Åström, K. J., & Wittenmark, B. *Computer-Controlled Systems: Theory and Design*. Prentice Hall. (Zero-order hold reconstruction)
