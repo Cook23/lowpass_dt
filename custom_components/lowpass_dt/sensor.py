@@ -458,8 +458,14 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # PASS dt_silence_raw TO PUBLISHER
         self.publisher.dt_silence = self.injector.dt_silence_raw
 
-        # Publish end-of-silence marker before source resumes
-        if self.injector.silent and self._last_source_value is not None and self._attr_state_class not in ("total", "total_increasing") and self.publisher.should_publish(now, marker=True):
+        # Publish end-of-silence marker before source resumes.
+        # Only if the output actually had time to converge to the frozen
+        # source value during the silence: if the source resumes before
+        # convergence, there was never a real flat plateau to mark.
+        converged_before_resume = self.publisher._check_convergence(
+            self._last_source_value, self.core.effective_deadband()
+        )
+        if self.injector.silent and self._last_source_value is not None and converged_before_resume and self._attr_state_class not in ("total", "total_increasing") and self.publisher.should_publish(now, marker=True):
             marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0
             self.publisher.publish(
                 new_state,
