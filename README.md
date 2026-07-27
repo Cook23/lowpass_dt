@@ -18,6 +18,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
+- **v1.3.16** — Fixed a crash that could freeze the filtered output after a Home Assistant restart, introduced in v1.3.15.
 - **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
 - **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
 
@@ -76,6 +77,8 @@ However:
 - Frozen values pollute the Recorder with incorrect states.
 - No built-in filter properly handles irregular sampling + silence + adaptive deadband.
 
+Home Assistant's own built-in low-pass filter, for instance, has nothing left to react to once its source goes silent — no new events means no further computation, so its output simply stays wherever it was when the source stopped, however far that is from reality (a heater that was ramping up when its power sensor died, for example, stays frozen mid-ramp).
+
 This component does.
 
 ---
@@ -112,7 +115,7 @@ When a sensor stops publishing for longer than:
 dt_silence = mean(dt) + 3σ
 ```
 
-The silence threshold is learned automatically from the source's observed update rate. When silence is detected:
+The silence threshold is learned automatically from the source's observed update rate — this is a *timing* estimate (how long between updates), completely independent from the adaptive deadband (which estimates the *value*'s noise level). Disabling the deadband with `deadband: 0` has no effect on silence detection, and vice versa. When silence is detected:
 
 - Synthetic updates are injected at the natural source rate.
 - The filter converges smoothly toward the last known real value.
@@ -120,6 +123,10 @@ The silence threshold is learned automatically from the source's observed update
 - When the source resumes, an end-of-silence marker is published to ensure correct graph representation.
 
 No frozen fake values. No interpolation artifacts.
+
+Unlike Home Assistant's built-in low-pass filter, which simply has nothing left to do once its source stops emitting events, lowpass_dt keeps working during silence: it actively drives the output toward the source's last known value instead of leaving it wherever it happened to be.
+
+Like the adaptive deadband, this threshold is learned from an EMA and assumes there's a real gap between "normal update rhythm" and "actual silence" to detect. If a source already publishes near Home Assistant's practical ceiling (~1 reading/second) with a short `tau`, that learned threshold can end up quite tight, and the mechanism may occasionally trigger on ordinary timing jitter rather than a real silence. This is a much narrower edge case than the deadband one above — a false trigger here only starts an unnecessary injection cycle and does not, by itself, publish an incorrect value — but it's worth knowing about if you're pushing `tau` close to your source's real update interval.
 
 ---
 
@@ -238,31 +245,79 @@ This means that a small variation, smaller than the deadband threshold, will sti
 
 ## 📘 Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `source` | string | required | Source sensor entity_id |
-| `match` | string | required | Source sensor match string (pattern mode) |
-| `tau` | float | 60.0 | Low-pass time constant in seconds |
-| `prefix` | string | `lp_` | Prefix for generated entity_id |
-| `suffix` | string | `(Filtered)` | Suffix added to the friendly name |
-| `name` | string | None | Explicit friendly name (disables prefix/suffix) |
-| `unique_id` | string | auto | Optional unique_id seed (explicit sensors only) |
-| `deadband` | float | None | Fixed deadband threshold |
-| `deadband_tau_sigma` | float | max(100×tau, 10) | Period over which sigma is estimated |
-| `deadband_k_sigma` | float | 2.0 | Deviation multiplier for deadband threshold |
-| `min_rate_dt` | float | 3600 | Maximum interval between publishes (heartbeat) |
-| `max_rate_dt` | float | 10 | Minimum interval between publishes (rate limiter) |
-| `round` | int | auto | Rounding precision for output |
-| `circular` | string | None | Period for circular sensors (`360`, `2pi`, …) |
-| `silence` | string | None | Value published after convergence: `last` (default), `zero`, `unknown` |
-| `debug` | boolean | false | Enable verbose attributes |
+| Parameter | Type | Unit | Default | Description |
+|-----------|------|------|---------|-------------|
+| `source` | string | — | required | Source sensor entity_id |
+| `match` | string | — | required | Source sensor match string (pattern mode) |
+| `tau` | float | seconds | 60.0 | Low-pass time constant |
+| `prefix` | string | — | `lp_` | Prefix for generated entity_id |
+| `suffix` | string | — | `(Filtered)` | Suffix added to the friendly name |
+| `name` | string | — | None | Explicit friendly name (disables prefix/suffix) |
+| `unique_id` | string | — | auto | Optional unique_id seed (explicit sensors only) |
+| `deadband` | float | same unit as the source sensor | None | Fixed deadband threshold, in the source's own unit (W, °C, %, …). If set, disables the automatic (adaptive) deadband entirely — see below. |
+| `deadband_tau_sigma` | float | seconds | max(100×tau, 10) | Time constant of the exponential moving average used to estimate the filtered signal's own noise level (σ). Larger values make σ — and therefore the adaptive deadband — react more slowly to changes in noise level; smaller values track recent noise more tightly. Only relevant when `deadband` is not set. |
+| `deadband_k_sigma` | float | dimensionless (multiplier) | 2.0 | Multiplies the estimated noise σ to get the adaptive deadband threshold (`deadband = k × σ`). Higher = less sensitive (fewer updates, more noise tolerated); lower = more sensitive. Only relevant when `deadband` is not set. |
+| `min_rate_dt` | float | seconds | 3600 | Maximum interval between publishes (heartbeat) |
+| `max_rate_dt` | float | seconds | 10 | Minimum interval between publishes (rate limiter) |
+| `round` | int | number of decimal places | auto | Number of decimal digits to round the published value to (e.g. `round: 2` → `12.345` becomes `12.35`). If omitted, decimals are chosen automatically and adjusted dynamically from the effective deadband. |
+| `circular` | string | same unit as the source sensor (a period) | None | Period for circular sensors (`360`, `2pi`, …) |
+| `silence` | string | — | None | Value published after convergence: `last` (default), `zero`, `unknown` |
+| `debug` | boolean | — | false | Enable verbose attributes |
 
 A match string should avoid matching already filtered entities. A prefix is added to the generated entity_id to prevent this. Recursion is automatically blocked if a misconfigured match string matches filtered entities. Creation is limited to 100 entities per match string.
+
+`min_rate_dt` and `max_rate_dt` name a *duration* (`dt`, an interval in seconds), not a *rate* — the "min"/"max" refers to the resulting publish rate they enforce, not to the duration itself. This is the same inversion as frequency vs. period: a *maximum* frequency corresponds to a *minimum* period, and vice versa. So `min_rate_dt` (the smallest allowed rate) is enforced by the *largest* interval — it's the heartbeat ceiling, firing at most this rarely. `max_rate_dt` (the largest allowed rate) is enforced by the *smallest* interval — it's the rate limiter floor, firing at most this often.
 
 `min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
 `max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached.
 
 `silence` controls what value is published after the filter converges during silence. Use `zero` for sensors where silence means the device is off (power, current...) and the source failed to transmit that final zero. Use `unknown` when the value during silence is genuinely indeterminate. For `total` and `total_increasing` sensors this parameter has low effect — the end-of-silence marker is omitted so HA interpolates diagonally, which correctly reflects ongoing accumulation.
+
+### Deadband parameters in practice
+
+There are two mutually exclusive ways to control the deadband:
+
+- **Fixed** — set `deadband` to a number in the source's own unit. For example, `deadband: 5` on a power sensor (W) means the filtered output only republishes once it has moved by at least 5 W from the last published value (see the integral correction rule above for the slow-drift exception). Once `deadband` is set, `deadband_tau_sigma` and `deadband_k_sigma` are ignored.
+- **Adaptive (default)** — leave `deadband` unset. The integration estimates the signal's own noise level (σ) over a rolling window of `deadband_tau_sigma` seconds, and sets the effective deadband to `deadband_k_sigma × σ`. This is what "self-tuning" means in practice: a noisier sensor gets a wider deadband automatically, a quiet one gets a narrower one, without you measuring anything by hand.
+
+#### When the adaptive deadband isn't the right tool
+
+The adaptive deadband assumes there's real statistical oversampling to exploit — that within the noise-estimation window, the source is reporting the *same underlying value* multiple times with some scatter around it, so that scatter can be measured and told apart from genuine movement. If the source already publishes at Home Assistant's practical ceiling (effectively ~1 reading/second, with no faster internal sampling behind it) every single reading is itself a real, distinct measurement — there's no oversampling left to average out, and a fast, real transition (e.g. a battery hitting empty and its power reading dropping hard) looks statistically identical to noise. In that regime, σ can spike right when it shouldn't, and the deadband can temporarily balloon well past the point of being useful, delaying updates for a while after a genuine step change.
+
+This isn't a bug to tune away — no purely statistical rule can reliably separate "noise" from "signal" once they share the same characteristic frequency; the two concepts stop being distinguishable at all. If you're filtering a source that's already at (or near) that native update ceiling and you see the output getting stuck for a while after a real step change, set `deadband: 0` to disable the adaptive estimation entirely and rely on `tau` alone for smoothing.
+
+```yaml
+# Fixed deadband: republish only on a change of at least 5 W
+lowpass_dt:
+  sensors:
+    - source: sensor.oven_power_raw
+      tau: 30
+      deadband: 5
+
+# Adaptive deadband, tuned to react faster to changing noise levels
+# (useful on a sensor whose noise level itself varies a lot over the day)
+lowpass_dt:
+  sensors:
+    - source: sensor.wind_speed_raw
+      tau: 20
+      deadband_tau_sigma: 600     # re-estimate noise level over 10 minutes
+      deadband_k_sigma: 1.5       # more sensitive than the 2.0 default
+
+# Source already publishing near HA's practical ceiling (~1/s): no
+# oversampling to exploit, so the adaptive deadband is disabled outright
+lowpass_dt:
+  sensors:
+    - source: sensor.battery_power_raw
+      tau: 5
+      deadband: 0
+
+# Fixed rounding to 1 decimal, regardless of the deadband
+lowpass_dt:
+  sensors:
+    - source: sensor.room_temperature_raw
+      tau: 300
+      round: 1
+```
 
 ---
 
@@ -290,7 +345,8 @@ Event-driven, no polling, no background loops.
 - No ConfigFlow UI yet
 - Not reviewed for HA Core inclusion
 - Experimental default tuning
-- Edge cases may exist
+- Both the adaptive deadband and silence detection are learned from EMA statistics, and both assume a real gap between "normal" and "anomalous" on their respective axis (value noise, update timing). If a source already publishes near Home Assistant's practical update ceiling with a short `tau`, that gap can shrink to the point where the assumption breaks down — see [When the adaptive deadband isn't the right tool](#deadband-parameters-in-practice) for the value-side case, and the note under [Silence detection](#-silence-detection) for the timing-side one. There is currently no dedicated option to bypass silence detection the way `deadband: 0` bypasses the adaptive deadband.
+- Other edge cases may exist
 
 ---
 
