@@ -6,6 +6,32 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ---
 
+## v1.3.16
+
+### Fixed — better entity management
+
+- **Filtered entity never created when its source was unavailable at startup.** A pattern-matched source that was `unavailable` when Home Assistant finished starting was skipped by the startup scan, and its later creation was then blocked because the filtered entity already existed in the entity registry from a previous session. The filtered entity stayed an inactive Home Assistant placeholder until the next restart, with no unit of measurement — so any value written to it (by an automation, for instance) reached the Recorder without a unit. The filtered entity is now created as soon as its source reports a valid value.
+- **Orphaned filtered entities left behind when no pattern is configured.** Filtered entities whose explicit entry has been removed from the configuration are cleaned up at startup, but that cleanup only ran when at least one pattern was configured. With explicit entries only, a removed entry left its filtered entity behind as an unavailable leftover to delete by hand. The cleanup now always runs.
+
+### Fixed — filtering
+
+- **End-of-silence marker skipped after a real silence (regression in v1.3.15).** The marker decision reused the regular publish test, which compares the filter output with the last published value. Since the v1.3.15 zero-order hold, the output only starts moving toward a newly arrived value at the next sample, so at the moment the source resumed the output was still on the plateau and the marker was skipped — Home Assistant drew a diagonal across the whole silence again. The marker is now decided on the newly arrived value itself: it is published when the output converged during the silence and the new value departs from the published plateau by at least the deadband.
+- **Jump of the filtered value after a Home Assistant restart.** At startup, the source's current value was used for the first injection with the whole downtime as its time step, as if that value had been in effect during the entire shutdown. With a downtime comparable to `tau`, the output could jump a large fraction of the way toward that startup value (for example from 400 to about 200 with `tau: 60`, a one-minute restart and a source reading 0 at startup), then come back. The startup value is now handled as a regular sample under the same zero-order hold rule: the downtime is weighted on the last value known before shutdown, and the startup value only takes effect from startup onward.
+- The filter state restored at startup is no longer overwritten by the last published (rounded) value, which could introduce a small step.
+- Non-finite source values (`nan`, `inf`) are now ignored instead of permanently corrupting the filter state.
+
+### Fixed — configuration and logging
+
+- **Log flooded with `Publish blocked by max_rate_dt` warnings with a fixed deadband.** The warning is meant to flag an adaptive deadband that keeps hitting the rate limiter once σ has settled. With a fixed deadband — `deadband: 0` in particular, which every sample exceeds — reaching `max_rate_dt` is the normal behavior, and a 1 Hz source logged a warning for nearly every blocked sample (several hundred in 20 minutes). The warning is now only issued in adaptive mode.
+- **Inconsistent settings for a source matching several patterns.** At startup the last matching pattern applied, while a source appearing later took the first one, so the same source could be filtered with a different `tau` depending on when its filtered entity was created. The first matching pattern in the list now applies in both cases.
+- **Unknown configuration keys silently ignored.** A typo — `sensor:` instead of `sensors:`, or a misspelled parameter — disabled the affected entries or parameters without any message. Unknown keys are now reported as warnings in the log.
+
+### Documentation
+
+- The README now describes the adaptive deadband accurately: σ measures the variability of the filtered output — noise, plus any real movement within the `deadband_tau_sigma` window — not noise alone.
+
+---
+
 ## v1.3.15
 
 ### Fixed
