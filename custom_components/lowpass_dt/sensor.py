@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 
 from homeassistant.components.sensor import SensorEntity
@@ -153,7 +154,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     def _parse_source_value(self, state_str):
         """Extract numeric value and optional unit from source state string."""
         try:
-            return float(state_str), None
+            value = float(state_str)
+            return (value, None) if math.isfinite(value) else (None, None)
         except Exception:
             m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*(\S+)?\s*$', state_str)
             if m:
@@ -264,11 +266,22 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self._attr_native_value = float(last_state.state)
             except (ValueError, TypeError):
                 pass
+
+        # Keep the full-precision filter state restored from extra data,
+        # the published (rounded) value is only a fallback
+        if self.core.y is None:
             self.core.y = self._attr_native_value
 
         if self.core.y is None and self._last_source_value is not None:
             self.core.y = self._last_source_value
             self._attr_native_value = self._last_source_value
+
+        # ---- HA DOWNTIME (ZOH) ----
+        # The source value read at startup is a real sample: the downtime is
+        # weighted on the last value known before shutdown, and the startup
+        # value only takes effect from now on.
+        if self._last_source_value is not None:
+            self.core.update_from_source(self._last_source_value, dt_util.utcnow().timestamp())
 
         # ---- SOURCE via EXTRA_STATE ----
         self._attr_extra_state_attributes["source"] = self.cfg.source
@@ -459,13 +472,14 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self.publisher.dt_silence = self.injector.dt_silence_raw
 
         # Publish end-of-silence marker before source resumes.
-        # Only if the output actually had time to converge to the frozen
-        # source value during the silence: if the source resumes before
-        # convergence, there was never a real flat plateau to mark.
-        converged_before_resume = self.publisher._check_convergence(
-            self._last_source_value, self.core.effective_deadband()
-        )
-        if self.injector.silent and self._last_source_value is not None and converged_before_resume and self._attr_state_class not in ("total", "total_increasing") and self.publisher.should_publish(now, marker=True):
+        # Only if the output converged to the frozen source value during the
+        # silence (a real flat plateau exists) and the new value departs from
+        # that published plateau. Tested on the new value itself: with ZOH the
+        # filter output only moves toward it at the next sample.
+        deadband = self.core.effective_deadband()
+        converged_before_resume = self.publisher._check_convergence(self._last_source_value, deadband)
+        departs_from_plateau = self._attr_native_value is not None and abs(self.publisher._diff(x, self._attr_native_value)) >= deadband
+        if self.injector.silent and converged_before_resume and departs_from_plateau and self._attr_state_class not in ("total", "total_increasing"):
             marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0
             self.publisher.publish(
                 new_state,

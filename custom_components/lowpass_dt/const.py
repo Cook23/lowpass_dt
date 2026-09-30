@@ -17,7 +17,7 @@ CONF_TAU = "tau"                                  # low-pass time constant (seco
 CONF_ROUND = "round"                              # rounding precision for output
 
 CONF_DEADBAND = "deadband"                        # fixed deadband threshold (optional)
-CONF_DEADBAND_TAU_SIGMA = "deadband_tau_sigma"    # tau for sigma estimator (default max(1000*tau, 10h))
+CONF_DEADBAND_TAU_SIGMA = "deadband_tau_sigma"    # tau for sigma estimator (default max(100*tau, 10s))
 CONF_DEADBAND_K_SIGMA = "deadband_k_sigma"        # adaptive deadband multiplier (default 2.0)
 
 CONF_MIN_RATE_DT = "min_rate_dt"                  # max interval between outputs (seconds)

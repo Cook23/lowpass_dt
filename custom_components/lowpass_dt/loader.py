@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, CoreState
 from homeassistant.helpers import entity_registry as er
 
+from . import const
 from .const import (
     CONF_SENSORS,
     CONF_SOURCE,
@@ -29,6 +30,17 @@ _LOGGER = logging.getLogger(__name__)
 # ------------------------------------------------------------
 # Helpers (pure refactor no behavior change)
 # ------------------------------------------------------------
+
+# Every known configuration key, taken from const.py (single source of truth)
+_ITEM_KEYS = {v for k, v in vars(const).items() if k.startswith("CONF_")} - {CONF_SENSORS, CONF_PATTERNS}
+
+
+def _warn_unknown_keys(where: str, item, allowed: set[str]) -> None:
+    """Report keys that would otherwise be silently ignored (typos)."""
+    if isinstance(item, dict):
+        for key in item.keys() - allowed:
+            _LOGGER.warning("%s: unknown key %r ignored.", where, key)
+
 
 def _validate_pattern_item(p: dict) -> str | None:
     if not isinstance(p, dict):
@@ -76,6 +88,10 @@ async def async_setup_entry_loader(
     sensors_list = data.get(CONF_SENSORS, []) or []
     patterns_list = data.get(CONF_PATTERNS, []) or []
 
+    _warn_unknown_keys(DOMAIN, data, {CONF_SENSORS, CONF_PATTERNS})
+    for p in patterns_list:
+        _warn_unknown_keys("patterns[]", p, _ITEM_KEYS - {CONF_SOURCE})
+
     # ------------------------------------------------------------
     # Track existing lowpass entities (recursion guard)
     # ------------------------------------------------------------
@@ -90,6 +106,7 @@ async def async_setup_entry_loader(
     explicit: dict[str, LowpassCfg] = {}
 
     for item in sensors_list:
+        _warn_unknown_keys("sensors[]", item, _ITEM_KEYS - {CONF_MATCH})
         source = _validate_sensor_item(item)
         if not source:
             continue
@@ -161,7 +178,7 @@ async def async_setup_entry_loader(
 
                 eid = reg_entry.entity_id
 
-                if eid in explicit:
+                if eid in explicit or eid in keep_cfgs:
                     continue
 
                 if not fnmatch.fnmatch(eid, pat):
@@ -236,6 +253,7 @@ async def async_setup_entry_loader(
         for cfg in create_cfgs.values():
 
             meta = make_meta(hass, cfg, is_pattern=True)
+            desired_unique_ids.add(meta.unique_id)
 
             ent = sensor_cls(
                 hass,
@@ -255,12 +273,11 @@ async def async_setup_entry_loader(
                 if suggested:
                     own_entity_ids.add(f"sensor.{suggested}")
 
-    if patterns_list:
-        unsub = hass.bus.async_listen_once(
-            "homeassistant_started",
-            _full_rescan_after_start,
-        )
-        entry.async_on_unload(unsub)
+    unsub = hass.bus.async_listen_once(
+        "homeassistant_started",
+        _full_rescan_after_start,
+    )
+    entry.async_on_unload(unsub)
 
     # ------------------------------------------------------------
     # Dynamic pattern matching
@@ -307,17 +324,6 @@ async def async_setup_entry_loader(
             )
 
             meta = make_meta(hass, cfg, is_pattern=True)
-
-            reg = er.async_get(hass)
-
-            existing_entity_id = reg.async_get_entity_id(
-                "sensor",
-                DOMAIN,
-                meta.unique_id,
-            )
-
-            if existing_entity_id is not None:
-                return
 
             # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:

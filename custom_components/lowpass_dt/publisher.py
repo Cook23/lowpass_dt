@@ -45,22 +45,18 @@ class Publisher:
         self.decimals = None
 
     # ------------------------------------------------------------
+    # Difference a - b (wrapped for circular sensors)
+    # ------------------------------------------------------------
+    def _diff(self, a, b):
+        if self.cfg.circular is None:
+            return a - b
+        return ((a - b + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
+
+    # ------------------------------------------------------------
     # Convergence detection
     # ------------------------------------------------------------
     def _check_convergence(self, last_src, deadband):
-
-        if last_src is None:
-            return False
-
-        if self.cfg.circular is None:
-            err = self.core.y - last_src
-        else:
-            err = (
-                (self.core.y - last_src + self.cfg.circular / 2)
-                % self.cfg.circular
-            ) - self.cfg.circular / 2
-
-        return abs(err) < deadband
+        return last_src is not None and abs(self._diff(self.core.y, last_src)) < deadband
 
     # ------------------------------------------------------------
     # EMA helper (unchanged logic)
@@ -96,26 +92,19 @@ class Publisher:
     # ------------------------------------------------------------
     # Decide if a publish should occur
     # ------------------------------------------------------------
-    def should_publish(self, now, marker=False):
+    def should_publish(self, now):
         """Decide if we should publish."""
 
         if self.core.y is None:
             return False
 
         if self.core.time_last_pub is None or self.sensor._attr_native_value is None:
-            if not marker:
-                return True
-            return False
+            return True
 
         # deadband + integral correction
         deadband_eff = self.core.effective_deadband()
 
-        if self.cfg.circular is None:
-            self.core.err = self.core.y - self.sensor._attr_native_value
-        else:
-            self.core.err = (
-                (self.core.y - self.sensor._attr_native_value + self.cfg.circular / 2) % self.cfg.circular
-            ) - self.cfg.circular / 2
+        self.core.err = self._diff(self.core.y, self.sensor._attr_native_value)
 
         dt = max(0.0, now - self.core.time_last_pub)
         tau_i = max(1.0, self.cfg.tau)
@@ -126,7 +115,7 @@ class Publisher:
                 if (now - self.core.time_last_pub) > self.cfg.max_rate_dt or self.output_just_resumed:
                     return True
                 else:
-                    if self.core.t_sigma_start is not None:
+                    if self.cfg.deadband is None and self.core.t_sigma_start is not None:
                         elapsed = now - self.core.t_sigma_start
                         if elapsed >= self.cfg.deadband_tau_sigma:
                             _LOGGER.warning(
@@ -144,8 +133,7 @@ class Publisher:
             # periodic publish
             if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
                 if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
-                    if not marker:
-                        return True
+                    return True
 
         return False
 
