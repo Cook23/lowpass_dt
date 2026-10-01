@@ -37,7 +37,7 @@ class LowpassCore:
     def update_from_source(self, x, now):
         """Update filter from real source value."""
         if self.y is None:
-            self.y = x
+            self.y = x % self.cfg.circular if self.cfg.circular is not None else x
             self.t_prev = now
             self.x_prev = x
             self.t_sigma_start = now

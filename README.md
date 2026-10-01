@@ -18,7 +18,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
-- **v1.3.16** — Better entity management: a filtered entity is now created as soon as its source becomes available after startup, and orphaned filtered entities are cleaned up even when no pattern is configured. Also fixes the end-of-silence marker after the v1.3.15 zero-order hold change, and a jump of the filtered value after a restart. Unknown configuration keys are now reported, and a fixed deadband no longer floods the log.
+- **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north), `circular: false` turns it off. Also better entity management: a filtered entity is now created as soon as its source becomes available after startup, and orphaned filtered entities are cleaned up even when no pattern is configured. Also fixes the end-of-silence marker after the v1.3.15 zero-order hold change, and a jump of the filtered value after a restart. Unknown configuration keys are now reported, and a fixed deadband no longer floods the log.
 - **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
 - **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
 

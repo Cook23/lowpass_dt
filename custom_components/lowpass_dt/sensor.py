@@ -27,6 +27,8 @@ from .publisher import Publisher
 
 _LOGGER = logging.getLogger(__name__)
 
+_MISSING = object()
+
 
 # ------------------------------------------------------------
 # Setup entry (wrapper): delegated to loader.py
@@ -85,6 +87,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         self._last_source_value = None
         self._reset_pending = False
+
+        # circular: period of the restored filter state, whether the current one was
+        # auto-detected, and whether the entity is running (see _resolve_auto_circular)
+        self._restored_circular = None
+        self._circular_from_auto = False
+        self._running = False
 
         self.injector = TauInjector(
             hass,
@@ -255,6 +263,18 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             )
             self.cfg.circular = None
 
+        # A restored filter state computed with another period (circular just turned on
+        # or off — by the automatic detection after an upgrade, for instance) has a
+        # meaningless mean and σ for the new mode: σ of a wind direction averaged as a
+        # plain number reaches ~150°, which would hold the adaptive deadband wide open
+        # for hours. Restart the statistics instead.
+        if data:
+            prev = self._restored_circular
+            if prev is _MISSING:
+                prev = None if self._circular_from_auto else self.cfg.circular
+            if prev != self.cfg.circular:
+                self._reset_circular_stats(prev)
+
         # ---- DEVICE CLASS ----
         device_class = restore_attrs.get("device_class")
         if not device_class:
@@ -347,6 +367,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             _LOGGER.debug("no source or output value for %s source=%s", self.entity_id, self.cfg.source)
 
 
+        self._running = True
+
         _LOGGER.debug("entity added: %s source=%s", self.entity_id, self.cfg.source)
 
     # ------------------------------------------------------------
@@ -378,6 +400,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.x_prev = lp.get("x_prev")
         core.time_last_pub = lp.get("time_last_pub")
         core.err_i = lp.get("err_i", 0.0)
+        # (period the saved state was computed with; key absent before v1.3.17)
+        self._restored_circular = lp.get("circular", _MISSING)
 
         # EMA filtered signal
         ema = data.get("ema_source", {})
@@ -416,6 +440,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "x_prev": self.core.x_prev,
                 "time_last_pub": self.core.time_last_pub,
                 "err_i": self.core.err_i,
+                "circular": self.cfg.circular,
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,
@@ -449,12 +474,38 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if self._attr_state_class == "measurement_angle" or self._attr_native_unit_of_measurement == "°":
             self.cfg.circular = 360.0
             self.cfg.circular_auto = False
+            self._circular_from_auto = True
             _LOGGER.info(
                 "Sensor %s detected as an angle (unit=%r, state_class=%r): circular mode, period 360",
                 self.entity_id,
                 self._attr_native_unit_of_measurement,
                 self._attr_state_class,
             )
+            # (detected while running: the statistics so far were computed as plain numbers)
+            if self._running:
+                self._reset_circular_stats(None)
+
+    def _reset_circular_stats(self, prev_period) -> None:
+        """Restart the mean/σ statistics after a change of circular period."""
+        core = self.core
+        # (the filter output itself was computed in the other mode — 175° for a wind
+        # around the north averaged as a plain number: restart from the source)
+        if self._last_source_value is not None:
+            core.y = self._last_source_value
+            core.x_prev = self._last_source_value
+        if core.y is not None and self.cfg.circular is not None:
+            core.y = core.y % self.cfg.circular
+        core.src_mean = None
+        core.src_m2 = None
+        core.src_var = 0.0
+        core.src_sigma = 0.0
+        core.t_sigma_start = dt_util.utcnow().timestamp()
+        _LOGGER.info(
+            "Sensor %s: circular period changed (%s → %s), deadband statistics restarted",
+            self.entity_id,
+            prev_period,
+            self.cfg.circular,
+        )
 
     # ------------------------------------------------------------
     # Handle real source updates

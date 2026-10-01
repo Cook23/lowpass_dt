@@ -233,6 +233,9 @@ class Publisher:
                 ):
                     s._attr_state_class = "total"
 
+        # (unit / state_class only known now can make the source an angle)
+        s._resolve_auto_circular()
+
 
         # ------------------------------------------------------------
 
@@ -264,6 +267,12 @@ class Publisher:
             decimals = self.decimals
             
         reported = round(reported, decimals)
+
+        # A circular value stays within [0, period): 359.9996 rounds to 0, not 360
+        if self.cfg.circular is not None:
+            reported = round(reported % self.cfg.circular, decimals)
+            if reported >= self.cfg.circular:
+                reported = 0.0
 
         # ------------------------------------------------------------
         # 9. Hack to force record to recorder

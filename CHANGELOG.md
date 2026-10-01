@@ -6,17 +6,17 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ---
 
-## v1.3.17 — unreleased (beta)
+## v1.3.17
+
+(v1.3.16 was never released: its changes are part of this version.)
 
 ### New — angles detected automatically (`circular`)
 
 - **A wind direction filtered without `circular` was averaged as a plain number.** Around the north, 359 and 1 averaged to 180 — the filtered value swung to the south each time the wind crossed 0/360. Angles are now detected automatically: a source with state class `measurement_angle`, or a unit of exactly `°` (not `°C` or `°F`), is filtered as circular with a period of 360, without any configuration. The detection is logged.
 - **`circular: false`** turns it off explicitly. It used to be read as a period of 0 (a warning, then disabled); `none` or `null` now mean automatic, like leaving the option out.
 - The value is otherwise parsed as before — a number or numeric string sets the period, `2pi` (any case, spaces now ignored) sets 2π — and any other value, or a period ≤ 0, disables circular mode with a warning. These are the same values as the `circular` option of [history-explorer-card](https://github.com/Cook23/history-explorer-card) (v1.1.46), which draws angles without jumps at 0/360.
-
----
-
-## v1.3.16
+- **Switching to circular keeps a sane deadband.** A filter state saved in the other mode — a wind direction averaged as a plain number before this version, whose σ reaches ~150° — would have held the adaptive deadband wide open for hours. When the period changes (circular detected after the upgrade, or turned on or off in the configuration), the filter restarts from the source's current value with fresh deadband statistics. The period is now saved with the filter state.
+- A circular value is always published within [0, period): 359.9996 rounded to 2 decimals is published as 0, not 360.
 
 ### Fixed — better entity management
 
