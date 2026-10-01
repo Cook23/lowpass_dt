@@ -18,7 +18,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
-- **v1.3.16** — Better entity management: a filtered entity is now created as soon as its source becomes available after startup, and orphaned filtered entities are cleaned up even when no pattern is configured. Also fixes the end-of-silence marker after the v1.3.15 zero-order hold change, and a jump of the filtered value after a restart. Unknown configuration keys are now reported, and a fixed deadband no longer floods the log.
+- **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north), `circular: false` turns it off. Also better entity management: a filtered entity is now created as soon as its source becomes available after startup, and orphaned filtered entities are cleaned up even when no pattern is configured. Also fixes the end-of-silence marker after the v1.3.15 zero-order hold change, and a jump of the filtered value after a restart. Unknown configuration keys are now reported, and a fixed deadband no longer floods the log.
 - **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
 - **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
 
@@ -260,7 +260,7 @@ This means that a small variation, smaller than the deadband threshold, will sti
 | `min_rate_dt` | float | seconds | 3600 | Maximum interval between publishes (heartbeat) |
 | `max_rate_dt` | float | seconds | 10 | Minimum interval between publishes (rate limiter) |
 | `round` | int | number of decimal places | auto | Number of decimal digits to round the published value to (e.g. `round: 2` → `12.345` becomes `12.35`). If omitted, decimals are chosen automatically and adjusted dynamically from the effective deadband. |
-| `circular` | string | same unit as the source sensor (a period) | None | Period for circular sensors (`360`, `2pi`, …) |
+| `circular` | string | same unit as the source sensor (a period) | automatic | Period for circular sensors (angles): the filter averages across 0/360 (359 and 1 average to 0, not 180). Absent, `null` or `none`: automatic — a source with state class `measurement_angle` or a unit of exactly `°` (not `°C`/`°F`) is circular with a period of 360. `false`: never. A number or numeric string (`360`, `6.28`): that period; `2pi` (any case, spaces ignored): 2π. Any other value, or a period ≤ 0, disables it with a warning. Never applies to a `total_increasing` source. Same values as the `circular` option of [history-explorer-card](https://github.com/Cook23/history-explorer-card). |
 | `silence` | string | — | None | Value published after convergence: `last` (default), `zero`, `unknown` |
 | `debug` | boolean | — | false | Enable verbose attributes |
 

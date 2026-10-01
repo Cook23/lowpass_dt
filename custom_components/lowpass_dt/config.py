@@ -48,6 +48,9 @@ class LowpassCfg:
     rounding: int | None
 
     circular: float | None
+    # circular absent / null / 'none': resolved from the source once its unit and
+    # state_class are known (see LowpassSensor._resolve_auto_circular)
+    circular_auto: bool
     silence: str | None
 
     deadband: float | None
@@ -85,24 +88,32 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         _LOGGER.warning("Invalid tau=%r, must be > 0, using default 60.0", tau)
         tau = 60.0
 
+    # circular: absent / null / 'none' = automatic (state_class measurement_angle or a
+    # unit of exactly '°' gives 360, resolved at runtime), false = never, a number or a
+    # numeric string = the period, '2pi' = 2π. Anything else, or a period <= 0, disables
+    # it with a warning. (Same values as the history-explorer-card `circular` option.)
     raw_circular = item.get(CONF_CIRCULAR)
-    if raw_circular is None:
-        circular = None
+    circular = None
+    circular_auto = False
+    if raw_circular is None or ( isinstance(raw_circular, str) and raw_circular.strip().lower() == "none" ):
+        circular_auto = True
 
-    elif isinstance(raw_circular, str):
-        v = raw_circular.strip().lower()
+    elif raw_circular is False:
+        pass
 
-        if v == "2pi":
-            circular = 2 * math.pi
+    elif isinstance(raw_circular, bool):
+        _LOGGER.warning("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
+
+    else:
+        if isinstance(raw_circular, str):
+            v = "".join(raw_circular.split()).lower()
+            circular = 2 * math.pi if v == "2pi" else _float_or_default(v, None)
         else:
             circular = _float_or_default(raw_circular, None)
 
-    else:
-        circular = _float_or_default(raw_circular, None)
-
-    if circular is not None and circular <= 0:
-        _LOGGER.warning("Invalid circular=%r, must be > 0, disabling circular mode", raw_circular)
-        circular = None
+        if circular is None or not math.isfinite(circular) or circular <= 0:
+            _LOGGER.warning("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
+            circular = None
 
     # deadband (None allowed, but if provided must be >= 0)
     deadband = item.get(CONF_DEADBAND)
@@ -217,6 +228,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         tau=tau,
         name=name,
         circular=circular,
+        circular_auto=circular_auto,
         rounding=rounding,
         deadband=deadband,
         deadband_k_sigma=deadband_k_sigma,
