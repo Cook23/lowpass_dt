@@ -437,9 +437,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         return LowpassExtraData(data)
 
     # ------------------------------------------------------------
-    # Handle real source updates
-    # ------------------------------------------------------------
-    # ------------------------------------------------------------
     # circular: automatic detection (circular absent / null / 'none')
     # ------------------------------------------------------------
     def _resolve_auto_circular(self) -> None:
@@ -459,6 +456,9 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self._attr_state_class,
             )
 
+    # ------------------------------------------------------------
+    # Handle real source updates
+    # ------------------------------------------------------------
     @callback
     def _handle_source_event(self, event: Event) -> None:
 
