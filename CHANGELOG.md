@@ -6,6 +6,16 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ---
 
+## v1.3.17 — unreleased (beta)
+
+### New — angles detected automatically (`circular`)
+
+- **A wind direction filtered without `circular` was averaged as a plain number.** Around the north, 359 and 1 averaged to 180 — the filtered value swung to the south each time the wind crossed 0/360. Angles are now detected automatically: a source with state class `measurement_angle`, or a unit of exactly `°` (not `°C` or `°F`), is filtered as circular with a period of 360, without any configuration. The detection is logged.
+- **`circular: false`** turns it off explicitly. It used to be read as a period of 0 (a warning, then disabled); `none` or `null` now mean automatic, like leaving the option out.
+- The value is otherwise parsed as before — a number or numeric string sets the period, `2pi` (any case, spaces now ignored) sets 2π — and any other value, or a period ≤ 0, disables circular mode with a warning. These are the same values as the `circular` option of [history-explorer-card](https://github.com/Cook23/history-explorer-card) (v1.1.46), which draws angles without jumps at 0/360.
+
+---
+
 ## v1.3.16
 
 ### Fixed — better entity management

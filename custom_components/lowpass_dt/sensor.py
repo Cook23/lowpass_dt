@@ -245,6 +245,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if state_class:
             self._attr_state_class = state_class
 
+        self._resolve_auto_circular()
+
         if self.cfg.circular is not None and self._attr_state_class == "total_increasing":
             _LOGGER.warning(
                 "Sensor %s configured as circular (period=%s) but state_class=total_increasing. Disabling circular mode.",
@@ -437,6 +439,26 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # ------------------------------------------------------------
     # Handle real source updates
     # ------------------------------------------------------------
+    # ------------------------------------------------------------
+    # circular: automatic detection (circular absent / null / 'none')
+    # ------------------------------------------------------------
+    def _resolve_auto_circular(self) -> None:
+        """An angle — state_class measurement_angle, or a unit of exactly '°' (not °C/°F) —
+        is circular with a period of 360. Resolved once, as soon as it applies."""
+        if not self.cfg.circular_auto or self.cfg.circular is not None:
+            return
+        if self._attr_state_class == "total_increasing":
+            return
+        if self._attr_state_class == "measurement_angle" or self._attr_native_unit_of_measurement == "°":
+            self.cfg.circular = 360.0
+            self.cfg.circular_auto = False
+            _LOGGER.info(
+                "Sensor %s detected as an angle (unit=%r, state_class=%r): circular mode, period 360",
+                self.entity_id,
+                self._attr_native_unit_of_measurement,
+                self._attr_state_class,
+            )
+
     @callback
     def _handle_source_event(self, event: Event) -> None:
 
@@ -449,6 +471,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             return
         if unit and not self._attr_native_unit_of_measurement:
             self._attr_native_unit_of_measurement = unit
+            # (a unit only known now can make the source an angle)
+            self._resolve_auto_circular()
 
         now = dt_util.utcnow().timestamp()
 
