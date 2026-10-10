@@ -375,6 +375,70 @@ async def test_normal_sparse_spikes_weighted_by_their_duration(hass: HomeAssista
     assert abs(mean_out - (45 + 5 / 300)) < 0.01
 
 
+# ------------------------------------------------------------------ power consumption
+# What the user wants (default adaptive deadband): no static error — a source that holds
+# still ends up published exactly; a change of state of the system (a big consumer
+# switching) written at once; otherwise, while the load "lives", a point now and then.
+
+
+def power_samples(rng, t_end, consumers, period=5.0):
+    """A household base load that lives (300 W, slow wander, ±30 W jitter), reported every
+    5 s or so, plus consumers: [(watts, t_on, t_off)]."""
+    out, t, wander = [], 0.0, 0.0
+    while t < t_end:
+        wander = 0.98 * wander + rng.gauss(0, 8)
+        extra = sum(w for w, a, b in consumers if a <= t < b)
+        out.append((t, round(300 + wander + rng.gauss(0, 30) + extra, 1)))
+        t += rng.lognormvariate(math.log(period), 0.4)
+    return out
+
+
+def no_static_error(hass, stored, samples):
+    """After the source stopped changing, the output is its last value, to the published
+    decimals (derived from the deadband when `round` is not set)."""
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert stored[-1][1] == round(samples[-1][1], ent.publisher.decimals)
+
+
+def detection_delay(stored, t_edge, size):
+    """Time from a switch to the first write that moved by a quarter of it."""
+    before = held(stored, t_edge - 1)
+    return next((t - t_edge for t, v in stored if t >= t_edge and abs(v - before) >= 0.25 * size), math.inf)
+
+
+async def test_power_switches_written_at_once_otherwise_a_point_now_and_then(hass: HomeAssistant, freezer):
+    """tau = 30 s. A 600 W consumer, then a 2000 W one for an hour, then 600 W again 30 min
+    after it (σ still includes the big step), then the source stops changing."""
+    rng = random.Random(5)
+    tau, t_end = 30.0, 7 * 3600.0
+    consumers = [(600.0, 1.5 * 3600, 2 * 3600), (2000.0, 3 * 3600, 4 * 3600), (600.0, 4.5 * 3600, 5 * 3600)]
+    samples = power_samples(rng, t_end - 3600, consumers)
+    stored = await simulate(hass, freezer, samples, {"tau": tau}, t_end)
+    delays = {f"{w:.0f} W {'on' if k == 0 else 'off'} at {t / 3600:.2f} h": detection_delay(stored, t, w)
+              for w, a, b in consumers for k, t in enumerate((a, b))}
+    quiet = sum(1 for t, _ in stored if 1800 <= t < 3600) * 2
+    print("\npower:", {k: (round(v) if v != math.inf else "never") for k, v in delays.items()}, f"writes/h while it lives: {quiet}")
+    # the filter itself needs 0.29 tau to move by a quarter of a step; the deadband, raised
+    # by the steps σ includes, adds to it: allow 3 tau
+    assert all(d <= 3 * tau for d in delays.values()), delays
+    assert quiet <= 120                                    # a point now and then
+    no_static_error(hass, stored, samples)
+
+
+async def test_power_cycling_consumer_written_each_time(hass: HomeAssistant, freezer):
+    """A 2000 W consumer cycling 10 min on / 10 min off (a thermostat): σ then includes the
+    steps themselves and the deadband rises; each switch is still written within 3 tau."""
+    rng = random.Random(5)
+    tau, t_end = 30.0, 6 * 3600.0
+    consumers = [(2000.0, 3600.0 + k * 1200.0, 3600.0 + k * 1200.0 + 600.0) for k in range(12)]
+    samples = power_samples(rng, t_end - 3600, consumers)
+    stored = await simulate(hass, freezer, samples, {"tau": tau}, t_end)
+    delays = [detection_delay(stored, t, 2000.0) for _, a, b in consumers for t in (a, b)]
+    print("\ncycling:", [round(d) for d in delays])
+    assert max(delays) <= 3 * tau
+    no_static_error(hass, stored, samples)
+
+
 # ------------------------------------------------------------------ slowed-down regime
 
 

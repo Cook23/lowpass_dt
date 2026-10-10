@@ -18,6 +18,12 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   regime, where all of the above must hold. When the source slows down beyond `tau`, the
   low-pass no longer filters anything useful, but the output must stay sound: within the
   source's range, no overshoot, reaching the source's value, no flood of writes.
+- The deadband is there so as not to flood the Recorder; it has nothing to do with the
+  measurement's uncertainty. What is significant is a change of state of the physical
+  system (a big consumer starting): it must be written at once. While the signal just
+  "lives", a point now and then. No static error: a source that holds still ends up
+  published as is (the integral term). The adaptive deadband follows the amplitude of the
+  system's own variations (σ of the filtered output, over up to `deadband_tau_sigma`).
 - `tests/test_behavior.py` checks both regimes against the exact first-order filter.
 
 ## Versions (same rules as history-explorer-card)
