@@ -3,10 +3,14 @@
 Run against a real Home Assistant core (pytest-homeassistant-custom-component):
 
 ```
-python3 -m venv venv
+python3.14 -m venv venv
 venv/bin/pip install -r requirements_test.txt
 venv/bin/pytest
 ```
+
+`requirements_test.txt` pins Home Assistant 2026.10, which needs Python 3.14. With Python
+3.13, `pytest-homeassistant-custom-component==0.13.316` gives Home Assistant 2026.2. The
+suite is run on both.
 
 | File | What it covers |
 |---|---|

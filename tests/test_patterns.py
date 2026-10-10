@@ -141,3 +141,27 @@ async def test_reload_after_start_skips_the_startup_scan(hass: HomeAssistant):
     hass.states.async_set(eid, "11", ATTRS)
     await hass.async_block_till_done()
     assert hass.states.get("sensor.lp_power_a").state not in ("unavailable", None)
+
+
+async def test_guard_holds_whatever_entity_id_home_assistant_picks(hass: HomeAssistant, monkeypatch):
+    """Even if Home Assistant ignored the entity_id the integration sets, and derived it from
+    the friendly name instead (sensor.power_a_filtered, without the lp_ prefix), a broad
+    pattern must not filter the filtered entity: the guard knows it by the entity registry
+    (platform lowpass_dt), not by its entity_id."""
+    from custom_components.lowpass_dt.sensor import LowpassDtSensor
+
+    orig_init = LowpassDtSensor.__init__
+
+    def init_without_entity_id(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        self.entity_id = None
+
+    monkeypatch.setattr(LowpassDtSensor, "__init__", init_without_entity_id)
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", {**ATTRS, "friendly_name": "Power A"})
+    await setup_lowpass(hass, patterns=[{"match": "sensor.*"}])
+    await start(hass)
+    for t in range(5):
+        hass.states.async_set(eid, str(11 + t), {**ATTRS, "friendly_name": "Power A"})
+        await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.power_a_filtered"]
