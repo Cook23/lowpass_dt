@@ -47,7 +47,7 @@ def test_parse_rejects_non_measurements(state):
     assert parse(None, state) == (None, None)
 
 
-@pytest.mark.parametrize("deadband, decimals", [(0.5, 2), (0.05, 3), (5, 1), (0.0001, 5)])
+@pytest.mark.parametrize("deadband, decimals", [(0.5, 1), (0.05, 2), (5, 0), (0.0001, 5)])
 def test_initial_decimals_from_deadband(deadband, decimals):
     assert _update_decimals(deadband, None) == decimals
 
@@ -59,11 +59,10 @@ def _steady(deadband):
     return d
 
 
-@pytest.mark.parametrize("deadband", [0.5, 0.05, 0.005])
-def test_first_decimals_differ_from_steady_state(deadband):
-    """Known inconsistency: the first publish uses one decimal more than every following one
-    with the same deadband (the initial formula and the hysteresis band disagree)."""
-    assert _update_decimals(deadband, None) == _steady(deadband) + 1
+@pytest.mark.parametrize("deadband", [5, 0.5, 0.2, 0.05, 0.03, 0.005, 0.0001])
+def test_first_decimals_equal_steady_state(deadband):
+    """The first publish uses the same number of decimals as the following ones."""
+    assert _update_decimals(deadband, None) == _steady(deadband)
 
 
 def test_decimals_hysteresis_keeps_value_inside_band():
