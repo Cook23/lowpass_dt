@@ -10,12 +10,9 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
-
 from .config import (
     LowpassCfg,
     CfgMeta,
-    make_meta,
     parse_state,
 )
 
@@ -72,13 +69,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self,
         hass: HomeAssistant,
         cfg: LowpassCfg,
-        is_pattern: bool,
-        precomputed: CfgMeta | None = None,
+        meta: CfgMeta,
     ) -> None:
 
         self.hass = hass
         self.cfg = cfg
-        self.is_pattern = is_pattern
 
         self.core = LowpassCore(cfg)
         self.publisher = Publisher(self, cfg, self.core)
@@ -110,15 +105,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             cfg.source.split(".", 1)[1]
             if "." in cfg.source
             else cfg.source
-        )
-
-        # Fallback path (should rarely happen): delegate to make_meta(),
-        # the single source of truth also used by loader.py, instead of
-        # re-deriving name/slug/unique_id locally.
-        meta = precomputed if precomputed is not None else make_meta(
-            hass,
-            cfg,
-            is_pattern=is_pattern,
         )
 
         name_final = meta.name_final
@@ -378,7 +364,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.t_prev = lp.get("t_prev")
         core.x_prev = lp.get("x_prev")
         core.time_last_pub = lp.get("time_last_pub")
-        core.err_i = lp.get("err_i", 0.0)
         # (period the saved state was computed with; key absent before v1.3.17)
         self._restored_circular = lp.get("circular", _MISSING)
 
@@ -418,7 +403,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "t_prev": self.core.t_prev,
                 "x_prev": self.core.x_prev,
                 "time_last_pub": self.core.time_last_pub,
-                "err_i": self.core.err_i,
                 "circular": self.cfg.circular,
             },
             "ema_source": {
@@ -514,7 +498,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             # Hard reset of filter state
             self.core.y = x
             self.core.x_prev = x
-            self.core.err_i = 0.0
             self.core.t_prev = now
 
             self._reset_pending = True

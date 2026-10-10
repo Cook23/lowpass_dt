@@ -94,7 +94,7 @@ class TauInjector:
         self.hass.loop.call_soon(self.restart_silence_timer)
 
     # ------------------------------------------------------------
-    # Update EMA stats for dt_source (NO LOGIC CHANGE)
+    # Update EMA stats for dt_source
     # ------------------------------------------------------------
     def _update_dt_stats(self, t):
         if self.t_last_source is None:
@@ -116,7 +116,7 @@ class TauInjector:
         self._compute_limits()
 
     # ------------------------------------------------------------
-    # Compute silence limit & injection interval (NO LOGIC CHANGE)
+    # Compute silence limit & injection interval
     # ------------------------------------------------------------
     def _compute_limits(self):
         tau = float(self.cfg.tau)

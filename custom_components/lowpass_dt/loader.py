@@ -29,7 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
-# Helpers (pure refactor no behavior change)
+# Helpers
 # ------------------------------------------------------------
 
 # Every known configuration key, taken from const.py (single source of truth)
@@ -139,17 +139,12 @@ async def async_setup_entry_loader(
     desired_unique_ids: set[str] = set()  # unique_id reference set
 
     for cfg in explicit.values():
-        meta = make_meta(hass, cfg, is_pattern=False)
+        meta = make_meta(hass, cfg)
         explicit_meta[cfg.source] = meta
         desired_unique_ids.add(meta.unique_id)
 
     explicit_entities = [
-        sensor_cls(
-            hass,
-            cfg,
-            is_pattern=False,
-            precomputed=explicit_meta[cfg.source],
-        )
+        sensor_cls(hass, cfg, explicit_meta[cfg.source])
         for cfg in explicit.values()
     ]
 
@@ -224,11 +219,11 @@ async def async_setup_entry_loader(
         keep_unique_ids: set[str] = set()
 
         for cfg in explicit.values():
-            meta = make_meta(hass, cfg, is_pattern=False)
+            meta = make_meta(hass, cfg)
             keep_unique_ids.add(meta.unique_id)
 
         for cfg in keep_cfgs.values():
-            meta = make_meta(hass, cfg, is_pattern=True)
+            meta = make_meta(hass, cfg)
             keep_unique_ids.add(meta.unique_id)
 
         # ------------------------------------------------------------
@@ -255,15 +250,10 @@ async def async_setup_entry_loader(
 
         for cfg in create_cfgs.values():
 
-            meta = make_meta(hass, cfg, is_pattern=True)
+            meta = make_meta(hass, cfg)
             desired_unique_ids.add(meta.unique_id)
 
-            ent = sensor_cls(
-                hass,
-                cfg,
-                is_pattern=True,
-                precomputed=meta,
-            )
+            ent = sensor_cls(hass, cfg, meta)
 
             entities.append(ent)
 
@@ -328,7 +318,7 @@ async def async_setup_entry_loader(
                 allow_unique_id=False,
             )
 
-            meta = make_meta(hass, cfg, is_pattern=True)
+            meta = make_meta(hass, cfg)
 
             # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:
@@ -341,12 +331,7 @@ async def async_setup_entry_loader(
             desired_unique_ids.add(meta.unique_id)
             pattern_dynamic_created.add(meta.unique_id)
 
-            ent = sensor_cls(
-                hass,
-                cfg,
-                is_pattern=True,
-                precomputed=meta,
-            )
+            ent = sensor_cls(hass, cfg, meta)
 
             async_add_entities([ent])
 

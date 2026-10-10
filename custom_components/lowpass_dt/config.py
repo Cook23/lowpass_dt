@@ -32,7 +32,7 @@ MAX_PATTERN_ENTITIES = 100
 
 
 # ------------------------------------------------------------
-# Small numeric helper (NO behavior change)
+# Small numeric helper
 # ------------------------------------------------------------
 def _float_or_default(value, default):
     try:
@@ -97,7 +97,6 @@ class CfgMeta:
     use_name: bool
     unique_id: str
     unique_id_seed: str
-    is_pattern: bool
 
 
 # ------------------------------------------------------------
@@ -273,7 +272,6 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
 def compute_name_and_slug(
     hass: HomeAssistant,
     cfg: LowpassCfg,
-    is_pattern: bool,
 ) -> tuple[str, str, bool]:
     """Compute final friendly_name, slug(name_final), and name_mode flag."""
 
@@ -311,15 +309,11 @@ def compute_name_and_slug(
 def make_meta(
     hass: HomeAssistant,
     cfg: LowpassCfg,
-    *,
-    is_pattern: bool,
 ) -> CfgMeta:
 
-    name_final, slug, use_name = compute_name_and_slug(
-        hass, cfg, is_pattern
-    )
+    name_final, slug, use_name = compute_name_and_slug(hass, cfg)
 
-    # NEW UNIQUE_ID RULE:
+    # unique_id:
     # - sensors/source: if cfg.unique_id is provided, use it as seed
     # - otherwise: seed = prefix + source_object_id (without "sensor.")
     if cfg.unique_id:
@@ -340,5 +334,4 @@ def make_meta(
         use_name=use_name,
         unique_id=unique_id,
         unique_id_seed=seed,
-        is_pattern=is_pattern,
     )

@@ -25,8 +25,6 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return True
 
     # YAML present -> create or update config entry
-    yaml_data = yaml_data or {}
-
     if entries:
         entry = entries[0]
         if entry.data != yaml_data:

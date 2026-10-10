@@ -61,7 +61,7 @@ class Publisher:
         return last_src is not None and abs(self._diff(self.core.y, last_src)) < deadband
 
     # ------------------------------------------------------------
-    # EMA helper (unchanged logic)
+    # EMA helper
     # ------------------------------------------------------------
     def _update_dt_output_stats(self, dt_output):
         dt_output_sigma = None
@@ -132,10 +132,9 @@ class Publisher:
             else:
                 return True
         else:
-            # periodic publish
-            if self.cfg.min_rate_dt > self.cfg.max_rate_dt:
-                if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
-                    return True
+            # periodic publish (build_cfg ensures min_rate_dt > max_rate_dt)
+            if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
+                return True
 
         return False
 
@@ -400,7 +399,7 @@ class Publisher:
         s.async_write_ha_state()
 
     # ------------------------------------------------------------
-    # Injected publication (unchanged)
+    # Injected publication
     # ------------------------------------------------------------
     def publish_injected(self, last_source_value, now, dt):
         src = self.sensor.hass.states.get(self.cfg.source)
