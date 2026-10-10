@@ -1,6 +1,6 @@
 """patterns: creation by entity_id pattern, cleanup, recursion guard (loader.py)."""
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .conftest import setup_lowpass
@@ -86,61 +86,70 @@ async def test_broad_pattern_is_safe_once_entities_are_registered(hass: HomeAssi
 async def test_removed_explicit_entry_is_cleaned_up(hass: HomeAssistant):
     er.async_get(hass).async_get_or_create("sensor", "lowpass_dt", "lowpass_dt::lp_old", suggested_object_id="lp_old")
     hass.states.async_set("sensor.src", "1", ATTRS)
+    hass.set_state(CoreState.starting)
     await setup_lowpass(hass, sensors=[{"source": "sensor.src"}])
     # the orphan is not attached to the config entry yet in this test: attach it
     reg = er.async_get(hass)
     entry = hass.config_entries.async_entries("lowpass_dt")[0]
     reg.async_update_entity("sensor.lp_old", config_entry_id=entry.entry_id)
+    hass.set_state(CoreState.running)
     await start(hass)
     assert "sensor.lp_old" not in lowpass_ids(hass)
     assert "sensor.lp_src" in lowpass_ids(hass)
 
 
-async def test_source_without_unique_id_is_created_then_cleaned_up(hass: HomeAssistant):
-    """BUG. A source not in the entity registry (a YAML sensor without unique_id) is
-    filtered by the dynamic path (it looks at states), but the startup scan only looks at
-    the registry: at each start, the cleanup removes its filtered entity from the registry,
-    and the dynamic path creates it again at its next state change."""
+async def test_source_without_unique_id_is_kept_at_start(hass: HomeAssistant):
+    """A source not in the entity registry (a YAML sensor without unique_id) is filtered,
+    and its filtered entity survives the startup scan (it used to be removed from the
+    registry at each start, and created again at the source's next state change)."""
     await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
     hass.states.async_set("sensor.power_yaml", "5", ATTRS)        # no registry entry
     await hass.async_block_till_done()
     assert "sensor.lp_power_yaml" in lowpass_ids(hass)
     await start(hass)                                              # as at the next start
-    assert "sensor.lp_power_yaml" not in lowpass_ids(hass)
+    assert "sensor.lp_power_yaml" in lowpass_ids(hass)
 
 
-async def test_non_numeric_source_gets_a_filtered_entity(hass: HomeAssistant):
-    """A pattern also matches date or text sensors; a date is parsed as its year with
-    the rest as a unit ("2026-10-10" → 2026, unit "-10-10")."""
+async def test_startup_scan_finds_source_without_unique_id(hass: HomeAssistant):
+    hass.states.async_set("sensor.power_yaml", "5", ATTRS)
+    hass.set_state(CoreState.starting)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    hass.set_state(CoreState.running)
+    await start(hass)
+    assert hass.states.get("sensor.lp_power_yaml") is not None
+
+
+async def test_non_numeric_source_is_not_filtered(hass: HomeAssistant):
+    """A pattern also matches date or text sensors: they get no filtered entity."""
     eid = register_source(hass, "power_last_reset")
     hass.states.async_set(eid, "2026-10-10", {})
+    hass.states.async_set("sensor.power_mode", "eco", {})
     await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
     await start(hass)
-    st = hass.states.get("sensor.lp_power_last_reset")
-    assert st is not None
-    assert st.state == "2026.0"
-    assert st.attributes.get("unit_of_measurement") == "-10-10"
+    hass.states.async_set("sensor.power_mode", "boost", {})
+    await hass.async_block_till_done()
+    assert lowpass_ids(hass) == []
 
 
-async def test_reload_after_start_skips_the_startup_scan(hass: HomeAssistant):
-    """After a reload of the entry (Home Assistant already running), 'homeassistant_started'
-    never fires again: matching sources get their filtered entity back only at their next
-    state change, and the cleanup does not run."""
+async def test_reload_after_start_scans_again(hass: HomeAssistant):
+    """After a reload of the entry (Home Assistant already running), the scan runs at once:
+    'homeassistant_started' will not fire again."""
     eid = register_source(hass, "power_a")
     hass.states.async_set(eid, "10", ATTRS)
     await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
     await start(hass)
-    assert hass.states.get("sensor.lp_power_a").state != "unavailable"
-
     entry = hass.config_entries.async_entries("lowpass_dt")[0]
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
     st = hass.states.get("sensor.lp_power_a")
-    assert st is None or st.state == "unavailable"
+    assert st is not None and st.state not in ("unavailable", "unknown")
 
-    hass.states.async_set(eid, "11", ATTRS)
-    await hass.async_block_till_done()
-    assert hass.states.get("sensor.lp_power_a").state not in ("unavailable", None)
+
+async def test_setup_while_running_scans_at_once(hass: HomeAssistant):
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    assert hass.states.get("sensor.lp_power_a") is not None
 
 
 async def test_guard_holds_whatever_entity_id_home_assistant_picks(hass: HomeAssistant, monkeypatch):
