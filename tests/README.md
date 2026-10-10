@@ -19,6 +19,3 @@ venv/bin/pytest
 Tests whose docstring starts with **BUG** or says **Known weakness / inconsistency** assert
 the current, wrong behaviour, so that the suite passes today and documents it. Once a fix
 lands, such a test fails: invert it into a test of the fixed behaviour.
-
-The silence tests use the `injector_in_loop` fixture: without it they are flaky, because the
-injector's timer callbacks run in a worker thread (`test_injection_runs_in_a_worker_thread`).
