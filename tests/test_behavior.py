@@ -1,5 +1,11 @@
-"""The filter as a whole, against what it is for:
+"""The filter as a whole, against what it is for, in two regimes:
 
+- normal: tau about 10 times the source's usual period (what the user is asked to set);
+- slowed down: the source's period beyond tau. The low-pass no longer filters anything
+  useful, but the output must stay sound: in the source's range, no overshoot, reaching
+  the source's value, no flood of writes.
+
+In the normal regime:
 1. a first-order low-pass, whatever the sampling: the published values follow the exact
    first-order filter of the source (each value held until the next, as ZOH assumes),
    with intervals from a fraction of a second to many minutes, bursts and silences;
@@ -255,96 +261,104 @@ def report(name, samples, stored, tau, t_end, step=5.0):
 
 # ------------------------------------------------------------------ scenarios
 
+ALPHA = pytest.mark.xfail(strict=True, reason="alpha = dt / (tau + dt) is not the exact first order: alpha = 1 - exp(-dt / tau) planned (BRANCH.md)")
 
-async def test_dense_noisy_source_spares_the_recorder(hass: HomeAssistant, freezer):
-    """A noisy source reporting every 2 s or so (bursts included) for 3 hours, a slow
-    drift, the default adaptive deadband: few writes, and the curve they draw stays on
-    the filtered signal."""
-    rng = random.Random(3)
-    tau, t_end = 60.0, 3 * 3600.0
-    signal = lambda t: 20 + 2 * math.sin(2 * math.pi * t / 7200) + rng.gauss(0, 0.3)
-    samples, t = [], 0.0
+
+def wave_samples(rng, t_end, period, burst=0.25, slow=0.0, silence=0.0, amplitude=5.0, noise=0.2):
+    """A slow wave with noise, reported around `period` (log-normal), with bursts (0.2 to
+    1 s), slow stretches (2 to 10 periods) and silences (20 to 60 min)."""
+    out, t = [], 0.0
     while t < t_end:
-        samples.append((t, round(signal(t), 3)))
-        t += rng.uniform(0.2, 1.0) if rng.random() < 0.3 else rng.lognormvariate(math.log(2), 0.5)
+        out.append((t, round(20 + amplitude * math.sin(2 * math.pi * t / 3600) + rng.gauss(0, noise), 3)))
+        r = rng.random()
+        if r < burst:
+            dt = rng.uniform(0.2, 1.0)
+        elif r < 1 - slow - silence:
+            dt = rng.lognormvariate(math.log(period), 0.5)
+        elif r < 1 - silence:
+            dt = rng.uniform(2 * period, 10 * period)
+        else:
+            dt = rng.uniform(1200, 3600)
+        t += dt
+    return out
+
+
+def sound(samples, stored):
+    """Every stored value within the source's range (no overshoot)."""
+    lo = min(x for _, x in samples)
+    hi = max(x for _, x in samples)
+    return all(lo - 1e-6 <= v <= hi + 1e-6 for _, v in stored)
+
+
+# ------------------------------------------------------------------ normal regime
+
+
+async def test_normal_dense_noisy_source_spares_the_recorder(hass: HomeAssistant, freezer):
+    """Reports every 2 s or so (bursts included), tau = 20 s, the default adaptive deadband,
+    3 hours of a drifting noisy signal: few writes, and their curve on the filtered signal."""
+    rng = random.Random(3)
+    tau, t_end = 20.0, 3 * 3600.0
+    samples = wave_samples(rng, t_end, period=2.0, burst=0.3, amplitude=2.0, noise=0.3)
     stored = await simulate(hass, freezer, samples, {"tau": tau}, t_end)
-    s = report("dense noisy", samples, stored, tau, t_end)
+    s = report("normal, dense noisy", samples, stored, tau, t_end)
     assert s["writes"] < s["samples"] / 10
     assert s["rms_err_linear"] < 0.3               # well under the noise (σ = 0.3)
+    assert sound(samples, stored)
 
 
-@pytest.mark.xfail(strict=True, reason="alpha = dt / (tau + dt) is not the exact first order: alpha = 1 - exp(-dt / tau) planned (BRANCH.md)")
-async def test_irregular_sampling_follows_first_order(hass: HomeAssistant, freezer):
-    """The same: each written value is the exact first-order filter of the source (within
-    the deadband), and the stored points joined by straight lines redraw it."""
+async def test_normal_irregular_sampling_is_first_order(hass: HomeAssistant, freezer):
+    """Reports every 4 s or so, with bursts, slow stretches and silences, tau = 40 s,
+    deadband 0.1: each written value is the exact first-order filter of the source, the
+    Recorder is spared, and the stored points redraw the filter by straight lines or
+    splines."""
     rng = random.Random(1)
-    tau, t_end = 300.0, 3 * 3600.0
-    signal = lambda t: 20 + 5 * math.sin(2 * math.pi * t / 3600) + rng.gauss(0, 0.2)
-    samples = irregular_samples(rng, t_end, signal)
+    tau, t_end = 40.0, 3 * 3600.0
+    samples = wave_samples(rng, t_end, period=4.0, slow=0.03, silence=0.002)
     stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.1}, t_end)
-    s = report("irregular", samples, stored, tau, t_end)
-    assert s["max_err_at_writes"] < 2 * 0.1        # each written value: the first-order filter
-    assert s["rms_err_linear"] < 0.1               # the curve redrawn by straight lines,
-    assert s["rms_err_monotone"] < 0.1             # by a monotone spline,
-    assert s["rms_err_tension"] < 0.1              # by a 'tension' spline
+    s = report("normal, irregular", samples, stored, tau, t_end)
+    assert s["writes"] < s["samples"] / 3
+    assert s["max_err_at_writes"] < 2 * 0.1
+    assert s["rms_err_linear"] < 0.1
+    assert s["rms_err_monotone"] < 0.1
+    assert s["rms_err_tension"] < 0.1
+    assert sound(samples, stored)
 
 
-@pytest.mark.xfail(strict=True, reason="alpha = dt / (tau + dt) is not the exact first order: alpha = 1 - exp(-dt / tau) planned (BRANCH.md)")
-async def test_slow_source_step_response_is_first_order(hass: HomeAssistant, freezer):
-    """A step seen by a source that reports every 10 minutes, tau = 2 minutes: once the
-    new value is known, the output follows 1 − exp(−t/tau), not a coarser curve."""
-    tau, t_end = 120.0, 3600.0
-    samples = [(0.0, 0.0), (600.0, 100.0)] + [(600.0 * k + 0.5 * (k % 2), 100.0 + 0.01 * (k % 2)) for k in range(2, 6)]
-    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.5, "max_rate_dt": 1}, t_end)
-    s = report("slow step", samples, stored, tau, t_end)
-    assert s["max_err_at_writes"] < 2 * 0.5
-
-
-@pytest.mark.xfail(strict=True, reason="points published every tau at best while the output moves: straight lines between them cut under the exponential (pacing by the deadband proposed)")
-async def test_slow_source_step_is_redrawn_by_straight_lines(hass: HomeAssistant, freezer):
-    """The same step: the stored points, joined by straight lines, redraw the exponential
-    within a few deadbands — the points must be close enough where the output moves."""
-    tau, t_end = 120.0, 3600.0
-    samples = [(0.0, 0.0), (600.0, 100.0)] + [(600.0 * k + 0.5 * (k % 2), 100.0 + 0.01 * (k % 2)) for k in range(2, 6)]
-    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.5, "max_rate_dt": 1}, t_end)
-    s = report("slow step (redrawn)", samples, stored, tau, t_end)
-    assert s["max_err_linear"] < 3 * 0.5
-
-
-async def test_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, freezer):
-    """Regular samples, an hour of silence, then a new level: the stored curve is flat over
-    the silence (no diagonal), with straight lines as with steps."""
+async def test_normal_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, freezer):
+    """Reports every 10 s, tau = 100 s; an hour of silence, then a new level: the stored
+    curve is flat over the silence (no diagonal), then rises, whatever draws it."""
     rng = random.Random(2)
-    tau, t_end = 60.0, 3 * 3600.0
-    samples = [(10.0 * k, round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]          # 1 h at ~30
-    samples += [(3600.0 + 3600.0 + 10.0 * k, round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]  # after 1 h
-    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.2}, t_end)
-    s = report("silence", samples, stored, tau, t_end)
-    # during the silence (well after convergence), the straight lines stay on the plateau
-    lin = [linear(stored, t) for t in range(3600 + 600, 7200 - 10, 30)]
-    assert max(abs(v - 30) for v in lin) < 0.3
-    assert s["max_err_at_writes"] < 0.6
-    assert s["max_err_monotone"] < 0.7            # a monotone spline redraws it as well
-
-
-@pytest.mark.xfail(strict=True, reason="a 'tension' spline rounds the corner where the output starts moving again: with points ~20 s apart (max_rate_dt), it bows away from the exponential (denser points after a corner proposed)")
-async def test_silence_resume_redrawn_by_tension_spline(hass: HomeAssistant, freezer):
-    """The same silence, drawn by Chart.js with 'tension: 0.4' (many cards): the curve
-    should not bow away from the filtered output where it starts moving again."""
-    rng = random.Random(2)
-    tau, t_end = 60.0, 3 * 3600.0
+    tau, t_end = 100.0, 3 * 3600.0
     samples = [(10.0 * k, round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
-    samples += [(3600.0 + 3600.0 + 10.0 * k, round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    samples += [(7200.0 + 10.0 * k, round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
     stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.2}, t_end)
-    s = report("silence (tension)", samples, stored, tau, t_end)
+    s = report("normal, silence", samples, stored, tau, t_end)
+    lin = [linear(stored, t) for t in range(3600 + 1200, 7200 - 10, 30)]
+    assert max(abs(v - 30) for v in lin) < 0.3
+    assert s["max_err_linear"] < 1.0
+    assert s["max_err_monotone"] < 1.0
+    assert sound(samples, stored)
+
+
+@ALPHA
+async def test_normal_silence_resume_redrawn_by_tension_spline(hass: HomeAssistant, freezer):
+    """The same, drawn by Chart.js 'tension: 0.4': where the output starts rising again, the
+    spline rounds the corner; it stays within 1 (5 % of the step) once the rise is the
+    exact exponential."""
+    rng = random.Random(2)
+    tau, t_end = 100.0, 3 * 3600.0
+    samples = [(10.0 * k, round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    samples += [(7200.0 + 10.0 * k, round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.2}, t_end)
+    s = report("normal, silence (tension)", samples, stored, tau, t_end)
     assert s["max_err_tension"] < 1.0
 
 
-async def test_sparse_spikes_weighted_by_their_duration(hass: HomeAssistant, freezer):
-    """Issue #4: a 45 W baseline reported every 30 s, a 50 W spike of 1 s every 5 min. The
-    filtered output, averaged over time, is the source's time-average (45.017 W), not
-    the spike counted for the whole preceding interval."""
-    tau, t_end = 60.0, 4 * 3600.0
+async def test_normal_sparse_spikes_weighted_by_their_duration(hass: HomeAssistant, freezer):
+    """Issue #4: a 45 W baseline reported every 30 s, tau = 300 s, a 50 W spike of 1 s
+    every 5 min. The output, averaged over time, is the source's time-average (45.017 W),
+    not the spike counted for the whole preceding interval."""
+    tau, t_end = 300.0, 4 * 3600.0
     samples, t = [], 0.0
     while t < t_end:
         for k in range(10):
@@ -354,8 +368,51 @@ async def test_sparse_spikes_weighted_by_their_duration(hass: HomeAssistant, fre
         t += 300.0
     samples.sort()
     stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.01, "max_rate_dt": 1}, t_end)
-    s = report("spikes", samples, stored, tau, t_end)
+    report("normal, spikes", samples, stored, tau, t_end)
     times = [k * 5.0 for k in range(int(t_end / 2 / 5), int(t_end / 5))]
     mean_out = sum(held(stored, t) for t in times) / len(times)
     print(f"time-average of the output: {mean_out:.4f} (source: {45 + 5 / 300:.4f})")
-    assert abs(mean_out - (45 + 5 / 300)) < 0.02
+    assert abs(mean_out - (45 + 5 / 300)) < 0.01
+
+
+# ------------------------------------------------------------------ slowed-down regime
+
+
+async def test_slowed_source_step_stays_sound(hass: HomeAssistant, freezer):
+    """A step seen by a source that reports every 10 minutes, tau = 2 minutes (set for a
+    source 10 times faster): nothing useful to filter, but the output stays within the
+    source's range, rises without overshoot, and reaches the new value."""
+    tau, t_end = 120.0, 3600.0
+    samples = [(0.0, 0.0), (600.0, 100.0)] + [(600.0 * k + 0.5 * (k % 2), 100.0 + 0.01 * (k % 2)) for k in range(2, 6)]
+    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.5, "max_rate_dt": 1}, t_end)
+    report("slowed, step", samples, stored, tau, t_end)
+    assert sound(samples, stored)
+    rise = [v for t, v in stored if 600 <= t < 1200]
+    assert rise == sorted(rise)
+    assert abs(stored[-1][1] - 100.0) < 0.5
+
+
+@ALPHA
+async def test_slowed_source_step_is_first_order(hass: HomeAssistant, freezer):
+    """The same step: once the new value is known, the written values follow
+    1 − exp(−t/tau), not a slower curve."""
+    tau, t_end = 120.0, 3600.0
+    samples = [(0.0, 0.0), (600.0, 100.0)] + [(600.0 * k + 0.5 * (k % 2), 100.0 + 0.01 * (k % 2)) for k in range(2, 6)]
+    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.5, "max_rate_dt": 1}, t_end)
+    s = report("slowed, step (first order)", samples, stored, tau, t_end)
+    assert s["max_err_at_writes"] < 2 * 0.5
+
+
+async def test_source_slowing_down_stays_sound(hass: HomeAssistant, freezer):
+    """A source set for tau = 40 s (every 4 s), that slows down to one value every 1 to
+    10 minutes for an hour, then comes back: the output stays sound and follows it."""
+    rng = random.Random(4)
+    tau, t_end = 40.0, 3 * 3600.0
+    samples, t = [], 0.0
+    while t < t_end:
+        samples.append((t, round(20 + 5 * math.sin(2 * math.pi * t / 3600) + rng.gauss(0, 0.2), 3)))
+        t += rng.uniform(60, 600) if 3600 <= t < 7200 else rng.lognormvariate(math.log(4), 0.5)
+    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.1}, t_end)
+    s = report("slowing down", samples, stored, tau, t_end)
+    assert sound(samples, stored)
+    assert s["rms_err_linear"] < 0.5

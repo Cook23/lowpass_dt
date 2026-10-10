@@ -20,13 +20,12 @@ A change that would break this is redesigned, not merged.
 ## Planned
 
 From the October 2026 review (details in the review's tests, `tests/`):
-- `alpha = 1 − exp(−dt/tau)`: the filter no longer depends on the sampling rate
-  (behavior change, to announce);
+- `alpha = 1 − exp(−dt/tau)`: the exact first order. Little change in the normal regime
+  (tau ~ 10 source periods); it matters when the source slows down beyond tau, and for
+  the curve right after a silence (behavior change, to announce);
 - a real integral term, or none;
-- proposal: while the output moves (after a new value, during a silence), publish points
-  paced by the deadband along its known exponential, so that straight lines between them
-  redraw it (`test_slow_source_step_is_redrawn_by_straight_lines`); and denser points
-  right after a corner (the output starting to move again), which a 'tension' spline
-  otherwise rounds (`test_silence_resume_redrawn_by_tension_spline`);
+- proposal, low priority (it only matters once the source is slower than tau): while the
+  output moves, publish points paced by the deadband along its known exponential, so that
+  straight lines and splines between them redraw it;
 - configuration validated by a voluptuous `CONFIG_SCHEMA`;
 - CI: hassfest, HACS validation, pytest.

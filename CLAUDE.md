@@ -8,6 +8,18 @@ Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read 
 on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
 `main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
 
+## What the filter is for (set by the user)
+
+- A first-order low-pass that behaves as one although the sampling is extremely
+  irregular; few writes, so as not to flood the Recorder; and a curve that looks natural
+  and realistic when redrawn from the stored points, by tools the user does not control
+  (straight lines or splines — hence the end-of-silence marker) as by history-explorer.
+- The user sets `tau` to about 10 times the source's usual period: that is the normal
+  regime, where all of the above must hold. When the source slows down beyond `tau`, the
+  low-pass no longer filters anything useful, but the output must stay sound: within the
+  source's range, no overshoot, reaching the source's value, no flood of writes.
+- `tests/test_behavior.py` checks both regimes against the exact first-order filter.
+
 ## Versions (same rules as history-explorer-card)
 
 - **Release version** `1.4.x` (`1.3.x` on `main`): set in `manifest.json`, the CHANGELOG
