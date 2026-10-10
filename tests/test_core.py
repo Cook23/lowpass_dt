@@ -32,7 +32,7 @@ def test_zoh_new_value_only_counts_from_next_interval():
     # dt=10 was spent at the previous value 0: no move yet
     assert c.y == 0.0
     run(c, [(20, 100.0)])
-    assert c.y == pytest.approx(100.0 * 10 / 20)  # alpha = dt / (tau + dt)
+    assert c.y == pytest.approx(100.0 * (1 - math.exp(-10 / 10)))  # alpha = 1 - exp(-dt / tau)
 
 
 def test_constant_input_is_a_fixed_point():
@@ -41,9 +41,9 @@ def test_constant_input_is_a_fixed_point():
     assert all(y == 42.0 for y in ys)
 
 
-def test_step_response_depends_on_sampling_rate():
-    """README: 'No sample-rate dependency'. With alpha = dt / (tau + dt) the response to
-    the same step, observed at the same time, depends on how often the source reports."""
+def test_step_response_does_not_depend_on_sampling_rate():
+    """The same step, observed at the same time, whether the source reports every 5 s or
+    once: the exact first order 1 - exp(-t / tau) in both cases."""
     tau = 60.0
 
     fast = core(tau=tau)
@@ -52,23 +52,20 @@ def test_step_response_depends_on_sampling_rate():
     slow = core(tau=tau)
     run(slow, [(0, 0.0), (1e-9, 1.0), (300.0, 1.0)])                           # one value at t = 300
 
-    exact = 1 - math.exp(-300 / tau)                                            # 0.9933
-    assert fast.y == pytest.approx(exact, abs=0.002)
-    assert slow.y == pytest.approx(300 / 360)                                    # 0.833
-    assert exact - slow.y > 0.15
+    exact = 1 - math.exp(-300 / tau)
+    assert fast.y == pytest.approx(exact, abs=1e-6)
+    assert slow.y == pytest.approx(exact, abs=1e-6)
 
 
-def test_exact_alpha_would_be_sampling_invariant():
-    """Same check with alpha = 1 - exp(-dt / tau): both paths give the same result."""
-    tau = 60.0
-
-    def y_after(dts):
-        y = 0.0
-        for dt in dts:
-            y += (1 - math.exp(-dt / tau)) * (1.0 - y)
-        return y
-
-    assert y_after([5.0] * 60) == pytest.approx(y_after([300.0]), rel=1e-12)
+def test_injected_steps_do_not_change_the_output():
+    """Computing the output more often (injection during a silence) gives the same value."""
+    a, b = core(tau=30), core(tau=30)
+    run(a, [(0, 0.0), (10, 50.0), (200, 50.0)])
+    run(b, [(0, 0.0), (10, 50.0)])
+    for t in range(20, 200, 7):
+        b.update_synthetic(50.0, float(t))
+    b.update_from_source(50.0, 200.0)
+    assert b.y == pytest.approx(a.y, rel=1e-12)
 
 
 def test_circular_mean_crosses_north():
@@ -102,4 +99,4 @@ def test_synthetic_update_pulls_towards_last_value():
     c = core(tau=10)
     run(c, [(0, 0.0), (10, 100.0)])
     c.update_synthetic(100.0, 20.0)
-    assert c.y == pytest.approx(50.0)
+    assert c.y == pytest.approx(100.0 * (1 - math.exp(-1)))

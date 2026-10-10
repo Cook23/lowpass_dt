@@ -26,20 +26,28 @@ def test_parse_ok(state, expected):
 
 
 @pytest.mark.parametrize(
-    "state, wrong",
+    "state, expected",
     [
-        ("12,5", (12.0, ",5")),                                    # decimal comma
-        ("2026-10-10", (2026.0, "-10-10")),                        # a date
-        ("2026-10-10T07:00:00+00:00", (2026.0, "-10-10T07:00:00+00:00")),  # a timestamp
-        ("1.2.3", (1.2, ".3")),                                    # a version number
+        ("20°C", (20.0, "°C")),
+        ("50 %", (50.0, "%")),
+        ("-.5 kWh", (-0.5, "kWh")),
+        ("1.5e2 W", (150.0, "W")),
     ],
 )
-def test_parse_accepts_non_numbers(state, wrong):
-    """Known weakness: the 'number + unit' regex turns these into a value and a fake unit."""
-    assert parse(None, state) == wrong
+def test_parse_number_with_unit(state, expected):
+    assert parse(None, state) == expected
 
 
-@pytest.mark.parametrize("deadband, decimals", [(0.5, 2), (0.05, 3), (5, 1), (0.0001, 5)])
+@pytest.mark.parametrize(
+    "state",
+    ["12,5", "2026-10-10", "2026-10-10T07:00:00+00:00", "1.2.3", "10:30", "1/2", "", "W 12"],
+)
+def test_parse_rejects_non_measurements(state):
+    """Dates, times, versions, a decimal comma: not a number followed by a unit."""
+    assert parse(None, state) == (None, None)
+
+
+@pytest.mark.parametrize("deadband, decimals", [(0.5, 1), (0.05, 2), (5, 0), (0.0001, 5)])
 def test_initial_decimals_from_deadband(deadband, decimals):
     assert _update_decimals(deadband, None) == decimals
 
@@ -51,11 +59,10 @@ def _steady(deadband):
     return d
 
 
-@pytest.mark.parametrize("deadband", [0.5, 0.05, 0.005])
-def test_first_decimals_differ_from_steady_state(deadband):
-    """Known inconsistency: the first publish uses one decimal more than every following one
-    with the same deadband (the initial formula and the hysteresis band disagree)."""
-    assert _update_decimals(deadband, None) == _steady(deadband) + 1
+@pytest.mark.parametrize("deadband", [5, 0.5, 0.2, 0.05, 0.03, 0.005, 0.0001])
+def test_first_decimals_equal_steady_state(deadband):
+    """The first publish uses the same number of decimals as the following ones."""
+    assert _update_decimals(deadband, None) == _steady(deadband)
 
 
 def test_decimals_hysteresis_keeps_value_inside_band():

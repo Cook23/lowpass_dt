@@ -1,24 +1,19 @@
 from __future__ import annotations
 
 import logging
-import math
-import re
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
-
 from .config import (
     LowpassCfg,
     CfgMeta,
-    make_meta,
+    parse_state,
 )
 
 from .filter import LowpassCore
@@ -28,6 +23,19 @@ from .publisher import Publisher
 _LOGGER = logging.getLogger(__name__)
 
 _MISSING = object()
+
+# state_class inferred from the device_class, when the source has none
+_MEASUREMENT_DEVICE_CLASSES = (
+    "power",
+    "current",
+    "voltage",
+    "temperature",
+    "humidity",
+    "pressure",
+    "frequency",
+    "signal_strength",
+)
+_TOTAL_DEVICE_CLASSES = ("energy", "gas", "water")
 
 
 # ------------------------------------------------------------
@@ -74,19 +82,16 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self,
         hass: HomeAssistant,
         cfg: LowpassCfg,
-        is_pattern: bool,
-        precomputed: CfgMeta | None = None,
+        meta: CfgMeta,
     ) -> None:
 
         self.hass = hass
         self.cfg = cfg
-        self.is_pattern = is_pattern
 
         self.core = LowpassCore(cfg)
         self.publisher = Publisher(self, cfg, self.core)
 
         self._last_source_value = None
-        self._reset_pending = False
 
         # circular: period of the restored filter state, whether the current one was
         # auto-detected, and whether the entity is running (see _resolve_auto_circular)
@@ -100,6 +105,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.core,
             lambda: self._last_source_value,
             self.publisher.publish_injected,
+            self.publisher.publish_tracked,
         )
 
         self._unsub_source = None
@@ -114,15 +120,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             else cfg.source
         )
 
-        # Fallback path (should rarely happen): delegate to make_meta(),
-        # the single source of truth also used by loader.py, instead of
-        # re-deriving name/slug/unique_id locally.
-        meta = precomputed if precomputed is not None else make_meta(
-            hass,
-            cfg,
-            is_pattern=is_pattern,
-        )
-
         name_final = meta.name_final
         slug = meta.slug
         use_name = meta.use_name
@@ -131,14 +128,18 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._unique_id_seed = meta.unique_id_seed
 
         # ------------------------------------------------------------
-        # ENTITY_ID / suggested_object_id
+        # ENTITY_ID
         # ------------------------------------------------------------
+        # Set before the entity is added: Home Assistant takes it as the entity_id of a
+        # new registry entry, and keeps the registered one (renamed by the user, or
+        # suffixed on a collision) for an existing entry.
         if use_name:
             object_id = slug
         else:
             object_id = f"{cfg.prefix}{object_id_src}"
 
-        self._attr_suggested_object_id = object_id
+        self.entity_id = f"sensor.{object_id}"
+        self._object_id = object_id
 
         # ------------------------------------------------------------
         # FRIENDLY NAME
@@ -161,14 +162,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # ------------------------------------------------------------
     def _parse_source_value(self, state_str):
         """Extract numeric value and optional unit from source state string."""
-        try:
-            value = float(state_str)
-            return (value, None) if math.isfinite(value) else (None, None)
-        except Exception:
-            m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*(\S+)?\s*$', state_str)
-            if m:
-                return float(m.group(1)), m.group(2)
-        return None, None
+        return parse_state(state_str)
 
 
     # ------------------------------------------------------------
@@ -183,6 +177,9 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         await super().async_added_to_hass()
 
+        # (the entity can be removed and added again, when its entity_id is changed)
+        self.injector.start()
+
         # ------------------------------------------------------------
         # Restore extra_data
         # ------------------------------------------------------------
@@ -191,33 +188,14 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if data:
             self._restore_internal_state(data.as_dict())
         else:
-            if self.entity_id == f"sensor.{self._attr_suggested_object_id}":
-                _LOGGER.warning("context lost or new entity for %r (empty filter state).", self.entity_id)
+            if self.entity_id == f"sensor.{self._object_id}":
+                _LOGGER.info("context lost or new entity for %r (empty filter state).", self.entity_id)
 
         # ------------------------------------------------------------
         # Exclude HA down time from stats
         # ------------------------------------------------------------
         self.injector.source_just_resumed = True
         self.publisher.output_just_resumed = True
-
-        # ------------------------------------------------------------
-        # Rename via registry (deferred, safe)
-        # ------------------------------------------------------------
-        async def _deferred_rename():
-            registry = er.async_get(self.hass)
-            entry = registry.async_get(self.entity_id)
-
-            if entry:
-                desired_entity_id = f"sensor.{self._attr_suggested_object_id}"
-
-                if entry.entity_id != desired_entity_id:
-                    registry.async_update_entity(
-                        entry.entity_id,
-                        new_entity_id=desired_entity_id,
-                    )
-
-        self.hass.async_create_task(_deferred_rename())
-
 
         # ------------------------------------------------------------
         # Restore last visible state (robust + immediate write)
@@ -317,7 +295,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         ):
             self.async_write_ha_state()
         else:
-            _LOGGER.warning(
+            _LOGGER.info(
                 "restore failed for %r — no value and no structural attributes (restore=%s, source=%s)",
                 self.entity_id,
                 list(restore_attrs.keys()) if restore_attrs else [],
@@ -329,18 +307,20 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # ------------------------------------------------------------
         if not self._use_name_mode:
 
+            # (kept for the entity's life: the source can be renamed at any time; the state is
+            # written only when the name changes, never at each value of the source)
             @callback
             def _update_name(_event):
                 st2 = self.hass.states.get(self.cfg.source)
-                if st2 is not None:
-                    base2 = (st2.attributes or {}).get("friendly_name")
-                    if base2 and not base2.startswith("sensor."):
-                        self._attr_name = f"{base2} {self.cfg.suffix}"
-                        self.async_write_ha_state()
-
-                if self._unsub_name:
-                    self._unsub_name()
-                    self._unsub_name = None
+                if st2 is None:
+                    return
+                base2 = (st2.attributes or {}).get("friendly_name")
+                if not base2 or base2.startswith("sensor."):
+                    return
+                name = f"{base2} {self.cfg.suffix}"
+                if name != self._attr_name:
+                    self._attr_name = name
+                    self.async_write_ha_state()
 
             self._unsub_name = async_track_state_change_event(
                 self.hass,
@@ -399,7 +379,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.t_prev = lp.get("t_prev")
         core.x_prev = lp.get("x_prev")
         core.time_last_pub = lp.get("time_last_pub")
-        core.err_i = lp.get("err_i", 0.0)
         # (period the saved state was computed with; key absent before v1.3.17)
         self._restored_circular = lp.get("circular", _MISSING)
 
@@ -439,7 +418,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "t_prev": self.core.t_prev,
                 "x_prev": self.core.x_prev,
                 "time_last_pub": self.core.time_last_pub,
-                "err_i": self.core.err_i,
                 "circular": self.cfg.circular,
             },
             "ema_source": {
@@ -460,6 +438,35 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         }
 
         return LowpassExtraData(data)
+
+    # ------------------------------------------------------------
+    # Unit, icon, device_class and state_class follow the source's
+    # ------------------------------------------------------------
+    def sync_source_attributes(self, attrs) -> None:
+        unit = attrs.get("unit_of_measurement")
+        if unit is not None:
+            self._attr_native_unit_of_measurement = unit
+
+        icon = attrs.get("icon")
+        if icon is not None:
+            self._attr_icon = icon
+
+        device_class = attrs.get("device_class")
+        if device_class is not None:
+            self._attr_device_class = device_class
+
+        # state_class: the source's, or else inferred from its device_class
+        state_class = attrs.get("state_class")
+        if state_class is not None:
+            self._attr_state_class = state_class
+        elif self._attr_state_class is None:
+            if device_class in _MEASUREMENT_DEVICE_CLASSES:
+                self._attr_state_class = "measurement"
+            elif device_class in _TOTAL_DEVICE_CLASSES:
+                self._attr_state_class = "total"
+
+        # (unit / state_class only known now can make the source an angle)
+        self._resolve_auto_circular()
 
     # ------------------------------------------------------------
     # circular: automatic detection (circular absent / null / 'none')
@@ -535,10 +542,9 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             # Hard reset of filter state
             self.core.y = x
             self.core.x_prev = x
-            self.core.err_i = 0.0
             self.core.t_prev = now
 
-            self._reset_pending = True
+            self.publisher.reset_pending = True
 
         # Update filter with real measurement
         dt = self.core.update_from_source(x, now)

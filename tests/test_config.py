@@ -80,3 +80,15 @@ def test_name_ignored_for_patterns():
 def test_debug_must_be_bool():
     assert cfg(debug="yes").debug is False
     assert cfg(debug=True).debug is True
+
+
+async def test_config_schema_passes_options_through(hass):
+    """CONFIG_SCHEMA only checks that lowpass_dt: is a mapping (or empty): options are
+    checked by build_cfg, which warns and falls back to defaults."""
+    from custom_components.lowpass_dt import CONFIG_SCHEMA
+
+    conf = {"lowpass_dt": {"sensors": [{"source": "sensor.x", "tau": "abc", "tua": 1}]}, "other": {}}
+    assert CONFIG_SCHEMA(conf) == conf
+    assert CONFIG_SCHEMA({"lowpass_dt": None}) == {"lowpass_dt": None}
+    with pytest.raises(Exception):
+        CONFIG_SCHEMA({"lowpass_dt": ["not", "a", "mapping"]})

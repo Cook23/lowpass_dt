@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import logging
+import re
 
 from dataclasses import dataclass
 
@@ -31,13 +32,36 @@ MAX_PATTERN_ENTITIES = 100
 
 
 # ------------------------------------------------------------
-# Small numeric helper (NO behavior change)
+# Small numeric helper
 # ------------------------------------------------------------
 def _float_or_default(value, default):
     try:
         return float(value)
     except Exception:
         return default
+
+
+# ------------------------------------------------------------
+# Source state parsing: a number, optionally followed by a unit
+# ------------------------------------------------------------
+# The unit must not start with a digit or a separator: a date ("2026-10-10"), a time
+# ("10:30"), a version ("1.2.3") or a decimal comma ("12,5") is not a measurement.
+_NUMBER_UNIT = re.compile(r"^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([^\d\s.,:;/+\-]\S*)?\s*$")
+
+
+def parse_state(state_str) -> tuple[float | None, str | None]:
+    """Numeric value and optional unit of a source state, or (None, None)."""
+    try:
+        value = float(state_str)
+        return (value, None) if math.isfinite(value) else (None, None)
+    except (TypeError, ValueError):
+        pass
+    m = _NUMBER_UNIT.match(state_str) if isinstance(state_str, str) else None
+    if m:
+        value = float(m.group(1))
+        if math.isfinite(value):
+            return value, m.group(2)
+    return None, None
 
 
 @dataclass
@@ -73,7 +97,6 @@ class CfgMeta:
     use_name: bool
     unique_id: str
     unique_id_seed: str
-    is_pattern: bool
 
 
 # ------------------------------------------------------------
@@ -249,7 +272,6 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
 def compute_name_and_slug(
     hass: HomeAssistant,
     cfg: LowpassCfg,
-    is_pattern: bool,
 ) -> tuple[str, str, bool]:
     """Compute final friendly_name, slug(name_final), and name_mode flag."""
 
@@ -287,15 +309,11 @@ def compute_name_and_slug(
 def make_meta(
     hass: HomeAssistant,
     cfg: LowpassCfg,
-    *,
-    is_pattern: bool,
 ) -> CfgMeta:
 
-    name_final, slug, use_name = compute_name_and_slug(
-        hass, cfg, is_pattern
-    )
+    name_final, slug, use_name = compute_name_and_slug(hass, cfg)
 
-    # NEW UNIQUE_ID RULE:
+    # unique_id:
     # - sensors/source: if cfg.unique_id is provided, use it as seed
     # - otherwise: seed = prefix + source_object_id (without "sensor.")
     if cfg.unique_id:
@@ -316,5 +334,4 @@ def make_meta(
         use_name=use_name,
         unique_id=unique_id,
         unique_id_seed=seed,
-        is_pattern=is_pattern,
     )

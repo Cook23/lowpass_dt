@@ -8,6 +8,31 @@ Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read 
 on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
 `main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
 
+## What the filter is for (set by the user)
+
+- A first-order low-pass that behaves as one although the sampling is extremely
+  irregular; few writes, so as not to flood the Recorder; and a curve that looks natural
+  and realistic when redrawn from the stored points, by tools the user does not control
+  (straight lines or splines — hence the end-of-silence marker) as by history-explorer.
+- The user sets `tau` to about 10 times the source's usual period: that is the normal
+  regime, where all of the above must hold. When the source slows down beyond `tau`, the
+  low-pass no longer filters anything useful, but the output must stay sound: within the
+  source's range, no overshoot, reaching the source's value, no flood of writes.
+- It is home automation: what is interesting happens over tens of seconds to hours (a
+  minute is a good average) — a house's temperature is roughly a first order of several
+  hours or days; a few seconds of power consumption do not change the monthly bill. The
+  deadband is a filter against what is "not significant", a deliberately loose criterion:
+  write what matters, not what does not, set up by itself, without the user ever saying
+  what matters. Not flight controls, not plate tectonics: keep the precision and the
+  machinery in proportion.
+- The deadband is there so as not to flood the Recorder; it has nothing to do with the
+  measurement's uncertainty. What is significant is a change of state of the physical
+  system (a big consumer starting): it must be written at once. While the signal just
+  "lives", a point now and then. No static error: a source that holds still ends up
+  published as is (the integral term). The adaptive deadband follows the amplitude of the
+  system's own variations (σ of the filtered output, over up to `deadband_tau_sigma`).
+- `tests/test_behavior.py` checks both regimes against the exact first-order filter.
+
 ## Versions (same rules as history-explorer-card)
 
 - **Release version** `1.4.x` (`1.3.x` on `main`): set in `manifest.json`, the CHANGELOG
@@ -17,6 +42,8 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
 - **Development build** `1.4.xbyyy` (`x` = the next release): `yyy` goes up by one at each
   change. Used only while developing and in discussions with the user, never in files:
   not in code comments, `manifest.json`, the CHANGELOG or commit and PR titles.
+  Each build is one commit, pushed to the work branch, so that builds can be compared
+  (`git diff`) and undone (`git revert`); the build ↔ commit table is given to the user.
 - **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
   after each merge. Nothing is merged without the user asking.
 - **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,

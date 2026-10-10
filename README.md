@@ -12,12 +12,29 @@
 > Works well in my environment. May break yours. Back up Home Assistant before installing.
 > Extensive logging is intentional during this validation phase and will be reduced in future stable versions.
 
+> [!IMPORTANT]
+> **This is version 1.4, a beta**
+>
+> The **1.4** line is published as a beta (pre-release) alongside the **1.3** line, which remains the recommended version. It follows a full review of the code, and makes the integration cleaner and more reliable. What 1.4 changes today:
+> - **a new filtered entity detects silences at once** — it used to wait for the next restart of Home Assistant;
+> - **an entity_id renamed in Home Assistant is kept**, instead of being set back;
+> - **a broad pattern** such as `sensor.*` no longer filters the filtered entities themselves.
+> - **the silence injection runs in Home Assistant's event loop**, no longer in a worker thread: a silence always ends the same way;
+> - **patterns** keep the filtered entity of a source without `unique_id` across restarts, scan again after a reload of the integration, and leave out sources that are not numbers (dates, text);
+> - **fewer warnings** in the log: normal events are logged at a lower level, warnings are kept for configuration errors;
+> - **the exact first-order low-pass**, whatever the source's rhythm, and **no more delay of one sample** on slow sources (weather): a new value moves the output at once.
+>
+> **To try it**, enable *Show beta versions* for this repository in HACS and download the latest 1.4; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
+>
+> *Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
+
 ---
 
 ## 📋 Version highlights
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
+- **v1.4.0 (beta)** — A full review of the code: the exact first-order low-pass whatever the source's rhythm, no more delay of one sample on slow sources, silence detection on new entities at once, safer patterns, `deadband_tau_sigma` effective again, fewer warnings; a test suite against a real Home Assistant.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
 - **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
 - **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
@@ -91,13 +108,13 @@ Handles irregular update intervals correctly:
 
 ```
 dt[n]    = t[n] - t[n-1]
-alpha[n] = dt[n] / (tau + dt[n])
+alpha[n] = 1 - exp(-dt[n] / tau)
 y[n]     = y[n-1] + alpha[n] * (x[n-1] - y[n-1])
 ```
 
-The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical.
+The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical. With `alpha = 1 - exp(-dt / tau)` — the exact solution of a first-order low-pass whose input is held over `dt` — the result does not depend on how the time is split: one step of 5 minutes or sixty steps of 5 seconds give the same output.
 
-The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the time that has just elapsed — is applied to `x[n-1]`, the value that was actually in effect during that interval, not to the newly arrived `x[n]`. The new sample only becomes "the value in effect" for the *next* interval. This matters for sparse or impulsive signals: a short-lived spike arriving after a long silence is not mistakenly weighted as if it had lasted the whole preceding interval. The trade-off is a one-sample delay, which is negligible for continuous, regularly-sampled signals and only becomes visible on sparse, spiky sources — exactly the case it was designed to fix.
+The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the time that has just elapsed — is applied to `x[n-1]`, the value that was actually in effect during that interval, not to the newly arrived `x[n]`. The new sample only becomes "the value in effect" for the *next* interval. This matters for sparse or impulsive signals: a short-lived spike arriving after a long silence is not mistakenly weighted as if it had lasted the whole preceding interval. Between two samples, the output follows its known course toward the value in effect, and is published whenever it moves by the deadband: on a slow source (weather updated every 10 minutes), a new value moves the output at once instead of one sample later.
 
 - No sample-rate dependency.
 - No overshoot. No instability.
@@ -138,10 +155,10 @@ Optional adaptive deadband:
 deadband = k × sigma(filtered_signal)
 ```
 
-The deadband threshold is estimated from the signal's own variability over time. It suppresses noise-induced recorder writes without requiring any manual threshold configuration. σ is measured on the filtered output over `deadband_tau_sigma`: while the signal is otherwise steady it reflects the noise, but any real movement within that window raises it too.
+The deadband threshold is estimated from the signal's own variability over time, without any manual configuration. σ is measured on the filtered output over `deadband_tau_sigma` (100 × `tau` by default), a period that covers the system's significant events: what the system does all the time is written now and then, what changes its state is written at once.
 
-- Self-tuning — adapts to the signal's own variability automatically.
-- Eliminates micro-noise while preserving meaningful variations.
+- Self-tuning — adapts to the amplitude of the system's own variations automatically.
+- Divides the writes by 10 or more, while keeping the changes of state.
 - Falls back to a fixed deadband if `deadband` is explicitly set.
 - Integral correction ensures slow drifts are still captured even below the threshold.
 
@@ -210,22 +227,40 @@ No per-sensor tuning is required because parameters adapt automatically.
 
 ## 🔧 Fine-Tuning
 
-- Disable the deadband by setting `deadband: 0`
-- Plot historical curves of the source and filtered measurements
-- Adjust `tau` to filter out unwanted noise while preserving meaningful variations
-- Then choose:
-  - a fixed deadband value, or
-  - return to automatic deadband mode
+Set `tau` first — everything rests on it — then the deadband, then, if needed, the rate limits.
 
-If you choose automatic deadband:
+### 1. `tau`: the base of everything
 
-- Remove the `deadband` parameter
-- Wait approximately `300 × tau` for stabilization
-  - if `tau = 1 minute`, wait at least 5 hours
-  - if `tau = 1 hour`, wait at least 15 days
-- Adjust `deadband_k_sigma` if needed:
-  - Increase to make the filter less sensitive
-  - Decrease to make the filter more sensitive
+`tau` is the time constant of the low-pass, in seconds.
+
+- **Rule of thumb:** about **10 times the source's usual reporting period** — a sensor reporting every 6 s → `tau: 60`. If you know the time constant of the physical system measured (a room's temperature, a water tank), that is the natural choice.
+- **To tune it, look at the filtering alone.** Disable the deadband (`deadband: 0`), plot the source and the filtered output together over a day or two, and adjust `tau` until the filtered curve keeps the real variations and drops the noise. Then go on to the deadband.
+- **If the source slows down** beyond `tau` for a while, nothing breaks: the output stays within the source's range, without overshoot, and reaches the source's value. It just no longer filters anything useful.
+- `tau` also sets the default of `deadband_tau_sigma` (100 × `tau`) and the time constant of the integral correction (below).
+
+### 2. The deadband: what gets written
+
+The deadband is there so as not to flood the Recorder: keep about one point in ten, or fewer, and keep what matters:
+
+- a **change of state of the system** — a big consumer starting — is written at once;
+- while the signal just **lives**, a point now and then;
+- **no static error**: when the source holds still, the published value ends up equal to it (integral correction, below).
+
+**Automatic (default)** — leave `deadband` unset. The deadband is `deadband_k_sigma × σ`, where σ is the variability of the filtered output over `deadband_tau_sigma` (100 × `tau` by default). That period covers the system's significant events, so the deadband follows the amplitude of what the system usually does.
+
+- Measured on a simulated household power consumption (`tau: 30`, a value every 5 s): writes divided by 15 to 20; a point about every minute while the load lives; a consumer starting written within 10 to 30 s; its stop within about 2 × `tau`, since σ then includes the consumer's own step.
+- **Stabilization.** The time constant of σ starts at 10 × `tau` and grows to `deadband_tau_sigma`; allow about 3 × `deadband_tau_sigma` — 300 × `tau` by default — for the estimate to settle: about 5 hours with `tau` = 1 minute, about 12 days with `tau` = 1 hour.
+- **`deadband_k_sigma`** (default 2) mostly sets **how soon** a change is written; the number of writes changes little. At 1.5, the stop of a consumer is written up to several times sooner, for about 10 % more writes. Higher: fewer writes, later.
+- **`deadband_tau_sigma`** sets **how long** the deadband remembers what the system does. Longer: it remembers rarer events, and stays wider for longer after them. Shorter: it follows a change of regime sooner, but narrows in quiet periods, so more writes once the signal lives again.
+
+**Fixed** — `deadband` in the source's unit (`deadband: 50` on a power sensor), when you know the size of a significant change, such as the smallest appliance you want to see. `deadband_tau_sigma` and `deadband_k_sigma` are then ignored.
+
+**Disabled** — `deadband: 0`: every filtered value is written, within the rate limits.
+
+### 3. Rate limits
+
+- `max_rate_dt` (10 s): at most one write per this interval — except right after a silence.
+- `min_rate_dt` (3600 s): at least one write per this interval, even when nothing changes.
 
 ---
 
@@ -249,14 +284,14 @@ This means that a small variation, smaller than the deadband threshold, will sti
 |-----------|------|------|---------|-------------|
 | `source` | string | — | required | Source sensor entity_id |
 | `match` | string | — | required | Source sensor match string (pattern mode) |
-| `tau` | float | seconds | 60.0 | Low-pass time constant |
+| `tau` | float | seconds | 60.0 | Low-pass time constant — about 10 times the source's usual reporting period (see Fine-Tuning) |
 | `prefix` | string | — | `lp_` | Prefix for generated entity_id |
 | `suffix` | string | — | `(Filtered)` | Suffix added to the friendly name |
 | `name` | string | — | None | Explicit friendly name (disables prefix/suffix) |
 | `unique_id` | string | — | auto | Optional unique_id seed (explicit sensors only) |
 | `deadband` | float | same unit as the source sensor | None | Fixed deadband threshold, in the source's own unit (W, °C, %, …). If set, disables the automatic (adaptive) deadband entirely — see below. |
-| `deadband_tau_sigma` | float | seconds | max(100×tau, 10) | Time constant of the exponential moving average used to estimate the variability (σ) of the filtered output — noise, plus any real movement within that window. Larger values make σ — and therefore the adaptive deadband — react more slowly; smaller values track recent variability more tightly. Only relevant when `deadband` is not set. |
-| `deadband_k_sigma` | float | dimensionless (multiplier) | 2.0 | Multiplies the estimated σ to get the adaptive deadband threshold (`deadband = k × σ`). Higher = less sensitive (fewer updates, more noise tolerated); lower = more sensitive. Only relevant when `deadband` is not set. |
+| `deadband_tau_sigma` | float | seconds | max(100×tau, 10) | Longest time constant of the moving average that estimates the variability (σ) of the filtered output; it starts at 10 × `tau` and grows to this value. Longer: the deadband remembers rarer events; shorter: it follows a change of regime sooner. Only relevant when `deadband` is not set. |
+| `deadband_k_sigma` | float | dimensionless (multiplier) | 2.0 | Multiplies the estimated σ to get the adaptive deadband (`deadband = k × σ`). Mostly sets how soon a change is written: lower = sooner, a few more writes; higher = later, fewer writes. Only relevant when `deadband` is not set. |
 | `min_rate_dt` | float | seconds | 3600 | Maximum interval between publishes (heartbeat) |
 | `max_rate_dt` | float | seconds | 10 | Minimum interval between publishes (rate limiter) |
 | `round` | int | number of decimal places | auto | Number of decimal digits to round the published value to (e.g. `round: 2` → `12.345` becomes `12.35`). If omitted, decimals are chosen automatically and adjusted dynamically from the effective deadband. |
@@ -278,13 +313,11 @@ A match string should avoid matching already filtered entities. A prefix is adde
 There are two mutually exclusive ways to control the deadband:
 
 - **Fixed** — set `deadband` to a number in the source's own unit. For example, `deadband: 5` on a power sensor (W) means the filtered output only republishes once it has moved by at least 5 W from the last published value (see the integral correction rule above for the slow-drift exception). Once `deadband` is set, `deadband_tau_sigma` and `deadband_k_sigma` are ignored.
-- **Adaptive (default)** — leave `deadband` unset. The integration estimates the variability (σ) of the filtered output over a rolling window of `deadband_tau_sigma` seconds, and sets the effective deadband to `deadband_k_sigma × σ`. This is what "self-tuning" means in practice: a noisier sensor gets a wider deadband automatically, a quiet one gets a narrower one, without you measuring anything by hand.
+- **Adaptive (default)** — leave `deadband` unset. The integration estimates the variability (σ) of the filtered output with a moving average whose time constant grows up to `deadband_tau_sigma` seconds, and sets the effective deadband to `deadband_k_sigma × σ`. This is what "self-tuning" means in practice: a sensor whose system varies a lot gets a wider deadband automatically, a quiet one a narrower one, without you measuring anything by hand.
 
-#### When the adaptive deadband isn't the right tool
+#### Large steps
 
-Because σ is measured on the filtered output, it only reflects noise while the signal is otherwise steady. Any real transition within the `deadband_tau_sigma` window — a step, a ramp — raises σ as well, whatever the source's update rate, and widens the deadband for a while right after the change: updates can be held back until σ settles again (the integral correction still lets a persistent deviation through, later). This is most visible on sources whose real steps are large compared to their noise, such as battery or appliance power switching between levels.
-
-This isn't a bug to tune away — a purely statistical estimate on a single signal can't tell noise from movement once both show up on the same time scale. For such sources, set a fixed `deadband` in the source's unit, or `deadband: 0` to disable the deadband entirely and rely on `tau` alone for smoothing.
+σ includes every real movement within `deadband_tau_sigma`, steps included — by design, since that is what sets what the system usually does. Right after a large step, the deadband is therefore wider for a while: the next change is written a little later (within about 2 × `tau` in the power tests), and the integral correction still lets a lasting deviation through. If a source switches between levels often and you want each switch written sooner, lower `deadband_k_sigma` (1.5), or set a fixed `deadband` in the source's unit.
 
 ```yaml
 # Fixed deadband: republish only on a change of at least 5 W
@@ -303,8 +336,8 @@ lowpass_dt:
       deadband_tau_sigma: 600     # estimate σ over 10 minutes
       deadband_k_sigma: 1.5       # more sensitive than the 2.0 default
 
-# Large real steps compared to noise (battery power): the adaptive
-# deadband would widen after each step, so it is disabled outright
+# Frequent large steps (battery power), each one wanted at once:
+# no deadband, tau alone smooths
 lowpass_dt:
   sensors:
     - source: sensor.battery_power_raw
@@ -345,7 +378,7 @@ Event-driven, no polling, no background loops.
 - No ConfigFlow UI yet
 - Not reviewed for HA Core inclusion
 - Experimental default tuning
-- Both the adaptive deadband and silence detection are learned from EMA statistics, and both have limits. On the value side, σ also includes real movement, so large real steps widen the deadband for a while — see [When the adaptive deadband isn't the right tool](#deadband-parameters-in-practice). On the timing side, a source publishing near Home Assistant's practical update ceiling with a short `tau` can make the silence threshold very tight — see the note under [Silence detection](#-silence-detection). There is currently no dedicated option to bypass silence detection the way `deadband: 0` bypasses the adaptive deadband.
+- Both the adaptive deadband and silence detection are learned from EMA statistics, and both have limits. On the value side, σ includes real movement by design, so a large step widens the deadband for a while — see [Large steps](#large-steps). On the timing side, a source publishing near Home Assistant's practical update ceiling with a short `tau` can make the silence threshold very tight — see the note under [Silence detection](#-silence-detection). There is currently no dedicated option to bypass silence detection the way `deadband: 0` bypasses the adaptive deadband.
 - Other edge cases may exist
 
 ---

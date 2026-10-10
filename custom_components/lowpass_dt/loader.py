@@ -22,13 +22,14 @@ from .config import (
     CfgMeta,
     build_cfg,
     make_meta,
+    parse_state,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------
-# Helpers (pure refactor no behavior change)
+# Helpers
 # ------------------------------------------------------------
 
 # Every known configuration key, taken from const.py (single source of truth)
@@ -40,6 +41,11 @@ def _warn_unknown_keys(where: str, item, allowed: set[str]) -> None:
     if isinstance(item, dict):
         for key in item.keys() - allowed:
             _LOGGER.warning("%s: unknown key %r ignored.", where, key)
+
+
+def _is_measurement(state) -> bool:
+    """A state a pattern may filter: numeric, or not known yet (unknown)."""
+    return state.state == "unknown" or parse_state(state.state)[0] is not None
 
 
 def _validate_pattern_item(p: dict) -> str | None:
@@ -100,6 +106,13 @@ async def async_setup_entry_loader(
         e.entity_id for e in reg0.entities.values() if e.platform == DOMAIN
     }
 
+    def _is_own(eid: str) -> bool:
+        """A lowpass_dt entity: never filtered again (recursion guard)."""
+        if eid in own_entity_ids:
+            return True
+        reg_entry = er.async_get(hass).async_get(eid)
+        return reg_entry is not None and reg_entry.platform == DOMAIN
+
     # ------------------------------------------------------------
     # Build explicit configs
     # ------------------------------------------------------------
@@ -126,17 +139,12 @@ async def async_setup_entry_loader(
     desired_unique_ids: set[str] = set()  # unique_id reference set
 
     for cfg in explicit.values():
-        meta = make_meta(hass, cfg, is_pattern=False)
+        meta = make_meta(hass, cfg)
         explicit_meta[cfg.source] = meta
         desired_unique_ids.add(meta.unique_id)
 
     explicit_entities = [
-        sensor_cls(
-            hass,
-            cfg,
-            is_pattern=False,
-            precomputed=explicit_meta[cfg.source],
-        )
+        sensor_cls(hass, cfg, explicit_meta[cfg.source])
         for cfg in explicit.values()
     ]
 
@@ -144,9 +152,6 @@ async def async_setup_entry_loader(
 
     for ent in explicit_entities:
         own_entity_ids.add(ent.entity_id)
-        suggested = getattr(ent, "_attr_suggested_object_id", None)
-        if suggested:
-            own_entity_ids.add(f"sensor.{suggested}")
 
     # ------------------------------------------------------------
     # Initial pattern matching (executed after HA fully started)
@@ -155,8 +160,8 @@ async def async_setup_entry_loader(
     @callback
     def _full_rescan_after_start(_event):
 
-        create_cfgs: dict[str, LowpassCfg] = {}   # création (filtrée)
-        keep_cfgs: dict[str, LowpassCfg] = {}      # existence pure
+        create_cfgs: dict[str, LowpassCfg] = {}   # sources to filter now
+        keep_cfgs: dict[str, LowpassCfg] = {}      # sources that exist (cleanup keeps them)
 
         # ------------------------------------------------------------
         # Scan sources
@@ -169,14 +174,13 @@ async def async_setup_entry_loader(
 
             local_count = 0
 
+            # Sources: registered sensors, and sensors with a state but no registry entry
+            # (YAML sensors without unique_id), which the dynamic path below filters too
             reg = er.async_get(hass)
+            sources = {e.entity_id for e in reg.entities.values() if e.domain == "sensor"}
+            sources.update(hass.states.async_entity_ids("sensor"))
 
-            for reg_entry in reg.entities.values():
-
-                if reg_entry.domain != "sensor":
-                    continue
-
-                eid = reg_entry.entity_id
+            for eid in sorted(sources):
 
                 if eid in explicit or eid in keep_cfgs:
                     continue
@@ -184,7 +188,9 @@ async def async_setup_entry_loader(
                 if not fnmatch.fnmatch(eid, pat):
                     continue
 
-                if reg.async_get(eid) is None:
+                # Recursion protection: never filter a lowpass_dt entity
+                if _is_own(eid):
+                    _LOGGER.debug("patterns[]: match=%r includes lowpass sensor %r. Skipped to avoid recursion.", pat, eid)
                     continue
 
                 # -------- KEEP (existence only) --------
@@ -194,17 +200,9 @@ async def async_setup_entry_loader(
                     allow_unique_id=False,
                 )
 
-                # -------- CREATE (filtré) --------
+                # -------- CREATE (numeric sources only) --------
                 st = hass.states.get(eid)
-                if st is None:
-                    continue
-
-                if st.state in (None, "unavailable"):
-                    continue
-
-                # Recursion protection (entity_id only)
-                if eid in own_entity_ids:
-                    _LOGGER.warning("patterns[]: match=%r includes lowpass sensor %r. Skipped to avoid recursion.", pat, eid)
+                if st is None or not _is_measurement(st):
                     continue
 
                 local_count += 1
@@ -221,11 +219,11 @@ async def async_setup_entry_loader(
         keep_unique_ids: set[str] = set()
 
         for cfg in explicit.values():
-            meta = make_meta(hass, cfg, is_pattern=False)
+            meta = make_meta(hass, cfg)
             keep_unique_ids.add(meta.unique_id)
 
         for cfg in keep_cfgs.values():
-            meta = make_meta(hass, cfg, is_pattern=True)
+            meta = make_meta(hass, cfg)
             keep_unique_ids.add(meta.unique_id)
 
         # ------------------------------------------------------------
@@ -241,7 +239,7 @@ async def async_setup_entry_loader(
 
             # find the source entity from unique_id
             if entity.unique_id not in keep_unique_ids:
-                _LOGGER.warning("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
+                _LOGGER.info("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
                 reg.async_remove(entity.entity_id)
 
         # ------------------------------------------------------------
@@ -252,15 +250,10 @@ async def async_setup_entry_loader(
 
         for cfg in create_cfgs.values():
 
-            meta = make_meta(hass, cfg, is_pattern=True)
+            meta = make_meta(hass, cfg)
             desired_unique_ids.add(meta.unique_id)
 
-            ent = sensor_cls(
-                hass,
-                cfg,
-                is_pattern=True,
-                precomputed=meta,
-            )
+            ent = sensor_cls(hass, cfg, meta)
 
             entities.append(ent)
 
@@ -269,15 +262,17 @@ async def async_setup_entry_loader(
 
             for ent in entities:
                 own_entity_ids.add(ent.entity_id)
-                suggested = getattr(ent, "_attr_suggested_object_id", None)
-                if suggested:
-                    own_entity_ids.add(f"sensor.{suggested}")
 
-    unsub = hass.bus.async_listen_once(
-        "homeassistant_started",
-        _full_rescan_after_start,
-    )
-    entry.async_on_unload(unsub)
+    # Loaded while Home Assistant is starting: wait for every source to exist. Loaded once
+    # it runs (a reload of the entry): scan now, 'homeassistant_started' will not come again.
+    if hass.state is CoreState.running:
+        _full_rescan_after_start(None)
+    else:
+        unsub = hass.bus.async_listen_once(
+            "homeassistant_started",
+            _full_rescan_after_start,
+        )
+        entry.async_on_unload(unsub)
 
     # ------------------------------------------------------------
     # Dynamic pattern matching
@@ -299,7 +294,7 @@ async def async_setup_entry_loader(
         if not st:
             return
 
-        if st.state in (None, "unknown", "unavailable"):
+        if st.state in (None, "unknown", "unavailable") or not _is_measurement(st):
             return
 
         if new_eid in explicit:
@@ -314,7 +309,7 @@ async def async_setup_entry_loader(
             if not fnmatch.fnmatch(new_eid, pat):
                 continue
 
-            if new_eid in own_entity_ids:
+            if _is_own(new_eid):
                 return
 
             cfg = build_cfg(
@@ -323,33 +318,24 @@ async def async_setup_entry_loader(
                 allow_unique_id=False,
             )
 
-            meta = make_meta(hass, cfg, is_pattern=True)
+            meta = make_meta(hass, cfg)
 
             # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:
                 return
 
             if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
-                _LOGGER.error("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
+                _LOGGER.warning("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
                 return
 
             desired_unique_ids.add(meta.unique_id)
             pattern_dynamic_created.add(meta.unique_id)
 
-            ent = sensor_cls(
-                hass,
-                cfg,
-                is_pattern=True,
-                precomputed=meta,
-            )
+            ent = sensor_cls(hass, cfg, meta)
 
             async_add_entities([ent])
 
             own_entity_ids.add(ent.entity_id)
-
-            suggested = getattr(ent, "_attr_suggested_object_id", None)
-            if suggested:
-                own_entity_ids.add(f"sensor.{suggested}")
 
             break
 

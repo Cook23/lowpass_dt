@@ -4,6 +4,15 @@ import math
 _LOGGER = logging.getLogger(__name__)
 
 
+def _alpha(dt, tau):
+    """Weight of the value in effect over dt (zero-order hold): the exact first order,
+    1 - exp(-dt/tau). Splitting an interval in several steps gives the same result, so
+    the output does not depend on how often it is computed."""
+    if tau <= 0:
+        return 1.0
+    return 1.0 - math.exp(-dt / tau)
+
+
 class LowpassCore:
     """Pure math core: low-pass, adaptive sigma, deadband, rounding."""
 
@@ -31,6 +40,10 @@ class LowpassCore:
         # sigma horizon start (None = just started / no restore)
         self.t_sigma_start = None
 
+        # time of the last real sample: the σ statistics weigh real samples by the time
+        # between them, whatever was computed in between (injection, tracking)
+        self.t_last_real = None
+
     # ------------------------------------------------------------
     # Update filter from real source value
     # ------------------------------------------------------------
@@ -39,6 +52,7 @@ class LowpassCore:
         if self.y is None:
             self.y = x % self.cfg.circular if self.cfg.circular is not None else x
             self.t_prev = now
+            self.t_last_real = now
             self.x_prev = x
             self.t_sigma_start = now
 
@@ -56,7 +70,7 @@ class LowpassCore:
         tau = max(0.0, float(self.cfg.tau))
         t_prev = self.t_prev if self.t_prev is not None else now
         dt = max(0.0, now - t_prev)
-        alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
+        alpha = _alpha(dt, tau)
         x_prev = self.x_prev if self.x_prev is not None else self.y
 
         # Zero-order hold (ZOH): dt[n] is the duration during which x_prev
@@ -76,6 +90,11 @@ class LowpassCore:
         # EMA of filtered signal
         # -------------------------
 
+        # Start of the σ estimate, from which its time constant grows from 10 tau to
+        # deadband_tau_sigma. Set here, not only on the very first sample: the sensor
+        # gives the filter its value (last state, or the source's) before any sample.
+        if self.t_sigma_start is None:
+            self.t_sigma_start = now
         tau_lp = max(0.0, float(self.cfg.tau))
         tau_s_min = 10.0 * tau_lp
         tau_s_max = max(0.0, float(self.cfg.deadband_tau_sigma))
@@ -87,7 +106,9 @@ class LowpassCore:
             elapsed = max(0.0, now - self.t_sigma_start)
             tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
 
-        beta = (dt / (tau_s_dynamic + dt)) if (tau_s_dynamic + dt) > 0 else 0.1
+        dt_real = max(0.0, now - self.t_last_real) if self.t_last_real is not None else dt
+        self.t_last_real = now
+        beta = (dt_real / (tau_s_dynamic + dt_real)) if (tau_s_dynamic + dt_real) > 0 else 0.1
 
         if self.src_mean is None:
             self.src_mean = self.y
@@ -119,7 +140,7 @@ class LowpassCore:
         tau = max(0.0, float(self.cfg.tau))
         t_prev = self.t_prev if self.t_prev is not None else now
         dt = max(0.0, now - t_prev)
-        alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
+        alpha = _alpha(dt, tau)
 
         if self.cfg.circular is None:
             self.y = self.y + alpha * (last_source_value - self.y)

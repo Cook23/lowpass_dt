@@ -3,10 +3,14 @@
 Run against a real Home Assistant core (pytest-homeassistant-custom-component):
 
 ```
-python3 -m venv venv
+python3.14 -m venv venv
 venv/bin/pip install -r requirements_test.txt
 venv/bin/pytest
 ```
+
+`requirements_test.txt` pins Home Assistant 2026.10, which needs Python 3.14. With Python
+3.13, `pytest-homeassistant-custom-component==0.13.316` gives Home Assistant 2026.2. The
+suite is run on both.
 
 | File | What it covers |
 |---|---|
@@ -15,10 +19,10 @@ venv/bin/pytest
 | `test_parsing.py` | Source state parsing, output decimals |
 | `test_entity.py` | The entity in Home Assistant: publishing, silence, marker, circular, total_increasing, restore |
 | `test_patterns.py` | `patterns`: startup scan, dynamic creation, cleanup, recursion guard, reload |
+| `test_entity_id.py` | entity_id never derived from the friendly name, on every asynchronous path |
+| `test_behavior.py` | the filter as a whole, in the normal regime (tau ~ 10 source periods: first order, few writes, a natural curve redrawn by straight lines or splines) and when the source slows down beyond tau (a sound output); `-s` prints the measures |
 
-Tests whose docstring starts with **BUG** or says **Known weakness / inconsistency** assert
+Tests marked `xfail(strict=True)` state a goal the code does not reach yet, with the reason: when
+it is reached, they fail as XPASS, and the marker is removed. Tests whose docstring starts with **BUG** or says **Known weakness / inconsistency** assert
 the current, wrong behaviour, so that the suite passes today and documents it. Once a fix
 lands, such a test fails: invert it into a test of the fixed behaviour.
-
-The silence tests use the `injector_in_loop` fixture: without it they are flaky, because the
-injector's timer callbacks run in a worker thread (`test_injection_runs_in_a_worker_thread`).
