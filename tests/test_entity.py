@@ -3,7 +3,7 @@ import threading
 from datetime import timedelta
 
 import pytest
-from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -43,23 +43,6 @@ class Clock:
 @pytest.fixture
 def clock(hass, freezer):
     return Clock(hass, freezer)
-
-
-@pytest.fixture
-def injector_in_loop(monkeypatch):
-    """Runs the injector's timer callbacks in the event loop, as @callback would (the fix
-    for test_injection_runs_in_a_worker_thread). Without it, the silence tests below are
-    flaky: the result depends on how the worker thread interleaves with the loop."""
-    for name in ("_on_silence_detected", "_tick"):
-        orig = getattr(TauInjector, name)
-
-        def make(f):
-            @callback
-            def wrapper(self, *args):
-                return f(self, *args)
-            return wrapper
-
-        monkeypatch.setattr(TauInjector, name, make(orig))
 
 
 @pytest.fixture
@@ -167,7 +150,7 @@ async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
 # ------------------------------------------------------------------ silence
 
 
-async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, registered, injector_in_loop):
+async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, registered):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01, "max_rate_dt": 1}])
     await feed(hass, clock, [(t, (0 if t < 100 else 50) + jitter(t // 10)) for t in range(0, 110, 10)])
@@ -177,9 +160,9 @@ async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, regis
     assert float(hass.states.get(OUT).state) == pytest.approx(50.0, abs=0.002)  # driven to the last value
 
 
-async def test_injection_runs_in_a_worker_thread(hass: HomeAssistant, clock, registered, monkeypatch):
-    """Timers created with plain methods (no @callback) run in Home Assistant's executor:
-    the filter state is then modified outside the event loop."""
+async def test_injection_runs_in_the_event_loop(hass: HomeAssistant, clock, registered, monkeypatch):
+    """The injector's timer callbacks are @callback: they run in the event loop, never in
+    a worker thread where they would change the filter state while the loop uses it."""
     threads = set()
     orig = TauInjector._inject_once
 
@@ -192,12 +175,11 @@ async def test_injection_runs_in_a_worker_thread(hass: HomeAssistant, clock, reg
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01}])
     await feed(hass, clock, [(t, 10 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 400, step=5)
-    assert threads, "no injection happened"
-    assert False in threads, "every injection ran in the event loop"
+    assert threads == {True}
 
 
 @pytest.mark.parametrize("mode, expected", [("zero", "0.0"), ("unknown", "unknown")])
-async def test_silence_modes(hass: HomeAssistant, clock, registered, injector_in_loop, mode, expected):
+async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expected):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": mode}])
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
@@ -205,7 +187,7 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, injector_in
     assert hass.states.get(OUT).state == expected
 
 
-async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered, injector_in_loop):
+async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
@@ -222,7 +204,7 @@ async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered, inj
     assert len(writes) == 2 and float(writes[1]) > 25
 
 
-async def test_new_entity_has_silence_detection(hass: HomeAssistant, clock, injector_in_loop):
+async def test_new_entity_has_silence_detection(hass: HomeAssistant, clock):
     """A new entity is registered directly under its final entity_id (no rename, which
     used to remove and re-add it and stop its injector until the next restart)."""
     hass.states.async_set(SRC, "0", ATTRS)
@@ -234,7 +216,7 @@ async def test_new_entity_has_silence_detection(hass: HomeAssistant, clock, inje
     assert float(hass.states.get(OUT).state) == pytest.approx(20.0, abs=0.002)
 
 
-async def test_renaming_entity_id_in_ui_is_kept(hass: HomeAssistant, clock, registered, injector_in_loop):
+async def test_renaming_entity_id_in_ui_is_kept(hass: HomeAssistant, clock, registered):
     """A user renaming the filtered entity in the UI keeps the new id, and its silence
     detection keeps working (the injector starts again when the entity is re-added)."""
     hass.states.async_set(SRC, "0", ATTRS)

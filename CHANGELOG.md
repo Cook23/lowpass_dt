@@ -14,6 +14,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 - **An entity_id renamed in Home Assistant is kept.** It used to be set back at once to `lp_…`, and the rename also stopped the silence detection. The silence detection now starts again whenever the entity is re-added.
 - **A broad pattern filtered the filtered entities.** With a pattern such as `sensor.*`, the temporary id of a new filtered entity was not recognized as one of the integration's own: it was filtered again, and so on (`lp_lp_lp_…`), up to 100 entities or an error. Every entity of the integration is now recognized, even renamed.
 
+### Fixed — the silence injection ran outside Home Assistant's event loop
+
+- **Filter state changed from a worker thread.** The timers that detect a silence and inject the last value ran in a worker thread of Home Assistant, which changed the filter state while the event loop used it: the result of a silence could depend on how the two interleaved (seen in the tests: the same silence ended differently from one run to the next). Python 3.14, on which Home Assistant now runs, also reports it as an error in debug mode. They now run in the event loop.
+
 ---
 
 ## v1.3.17

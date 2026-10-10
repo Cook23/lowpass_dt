@@ -17,6 +17,8 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
 - **Development build** `1.4.xbyyy` (`x` = the next release): `yyy` goes up by one at each
   change. Used only while developing and in discussions with the user, never in files:
   not in code comments, `manifest.json`, the CHANGELOG or commit and PR titles.
+  Each build is one commit, pushed to the work branch, so that builds can be compared
+  (`git diff`) and undone (`git revert`); the build ↔ commit table is given to the user.
 - **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
   after each merge. Nothing is merged without the user asking.
 - **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,

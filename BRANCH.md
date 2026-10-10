@@ -20,9 +20,6 @@ A change that would break this is redesigned, not merged.
 ## Planned
 
 From the October 2026 review (details in the review's tests, `tests/`):
-- the entity_id set at creation, `_deferred_rename` removed, the injector restartable
-  (a new entity loses silence detection; a broad pattern filters its own entities);
-- the injector's timers in the event loop (`@callback`);
 - `alpha = 1 − exp(−dt/tau)`: the filter no longer depends on the sampling rate
   (behavior change, to announce);
 - patterns: sources without `unique_id` kept across restarts, scan and cleanup after a
