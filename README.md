@@ -337,6 +337,8 @@ A match string should avoid matching already filtered entities. A prefix is adde
 
 `min_rate_dt` and `max_rate_dt` name a *duration* (`dt`, an interval in seconds), not a *rate* — the "min"/"max" refers to the resulting publish rate they enforce, not to the duration itself. This is the same inversion as frequency vs. period: a *maximum* frequency corresponds to a *minimum* period, and vice versa. So `min_rate_dt` (the smallest allowed rate) is enforced by the *largest* interval — it's the heartbeat ceiling, firing at most this rarely. `max_rate_dt` (the largest allowed rate) is enforced by the *smallest* interval — it's the rate limiter floor, firing at most this often.
 
+When only one of the two is set and it conflicts with the other's default, the other follows it: `min_rate_dt: 2` alone sets `max_rate_dt` to 1, `max_rate_dt: 7200` alone sets `min_rate_dt` to 14400.
+
 `min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
 `max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached with the adaptive deadband — a warning is logged when it blocks a publish once σ has settled. With a fixed `deadband` (including `0`) it is the normal rate limiter, and blocked publishes are not logged.
 

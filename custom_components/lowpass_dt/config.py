@@ -224,6 +224,14 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         _LOGGER.warning("Invalid min_rate_dt=%r, must be >= 0, using default 3600.0", item.get(CONF_MIN_RATE_DT))
         min_rate_dt = 3600.0
 
+    # Only one of the two given, at odds with the other's default: the other follows it
+    # (min_rate_dt: 2 alone asks for a write every 2 s at least, not for the defaults)
+    if max_rate_dt >= min_rate_dt:
+        if CONF_MAX_RATE_DT not in item and CONF_MIN_RATE_DT in item:
+            max_rate_dt = min_rate_dt / 2
+        elif CONF_MIN_RATE_DT not in item and CONF_MAX_RATE_DT in item:
+            min_rate_dt = max_rate_dt * 2
+
     if max_rate_dt >= min_rate_dt:
         _LOGGER.warning("Invalid max_rate_dt=%r >= min_rate_dt=%r, publish interval must satisfy max_rate_dt < min_rate_dt, using defaults 10.0 and 3600.0", item.get(CONF_MAX_RATE_DT), item.get(CONF_MIN_RATE_DT))
         max_rate_dt = 10.0
