@@ -76,6 +76,11 @@ class LowpassCore:
         # EMA of filtered signal
         # -------------------------
 
+        # Start of the σ estimate, from which its time constant grows from 10 tau to
+        # deadband_tau_sigma. Set here, not only on the very first sample: the sensor
+        # gives the filter its value (last state, or the source's) before any sample.
+        if self.t_sigma_start is None:
+            self.t_sigma_start = now
         tau_lp = max(0.0, float(self.cfg.tau))
         tau_s_min = 10.0 * tau_lp
         tau_s_max = max(0.0, float(self.cfg.deadband_tau_sigma))

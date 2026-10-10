@@ -250,6 +250,55 @@ async def test_renaming_entity_id_in_ui_is_undone(hass: HomeAssistant, clock, re
     assert ent.injector._stopped is True
 
 
+# ------------------------------------------------------------------ adaptive deadband
+
+
+def sigma_time_constant(ent, now):
+    """The time constant of the EMA of σ, as filter.py computes it."""
+    tau_s_min = 10.0 * ent.cfg.tau
+    if ent.core.t_sigma_start is None:
+        return tau_s_min
+    return min(ent.cfg.deadband_tau_sigma, max(tau_s_min, now - ent.core.t_sigma_start))
+
+
+async def test_sigma_time_constant_grows_on_a_new_entity(hass: HomeAssistant, clock, registered):
+    """The EMA of σ starts at 10 tau and grows with time up to deadband_tau_sigma. It stayed
+    at 10 tau on every entity created since March 2026: t_sigma_start was only set when
+    the filter had no value yet, and the sensor gives it one before any sample."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 20, "deadband_tau_sigma": 1000}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(2, 1200, 2)])
+    assert ent.core.t_sigma_start is not None
+    now = dt_util.utcnow().timestamp()
+    assert sigma_time_constant(ent, now) == 1000
+
+
+async def test_sigma_start_restored_empty_is_set_again(hass: HomeAssistant, clock):
+    """An entity saved with t_sigma_start empty (created since March 2026) gets it at its
+    first sample after the upgrade."""
+    t = dt_util.utcnow().timestamp()
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, "10.0", {"unit_of_measurement": "W", "state_class": "measurement"}),
+                {
+                    "low_pass": {"y": 10.0, "t_prev": t - 5, "x_prev": 10.0, "time_last_pub": t - 5, "err_i": 0.0, "circular": None},
+                    "ema_source": {"src_mean": 10.0, "src_var": 0.0, "t_sigma_start": None},
+                    "ema_dt_source": {"dt_mean": 2.0, "dt_m2": 4.0, "t_last_source": t - 5},
+                    "ema_dt_output": {"dt_output_mean": 10.0, "dt_output_m2": 100.0, "decimals": 2},
+                },
+            )
+        ],
+    )
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 20}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(2, 10.001)])
+    assert ent.core.t_sigma_start is not None
+
+
 # ------------------------------------------------------------------ circular
 
 
