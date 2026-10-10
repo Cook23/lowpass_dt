@@ -13,6 +13,11 @@ either piece here must be mirrored there (and vice versa), or the docs on both s
 wrong. The card is worked on in its own Claude session; tell the user when a change here
 needs a matching change in the card.
 
+Rule set by the user: each session manages its own repository's code. A session may write
+`.md` files in the other repository only with the user's explicit approval, and never
+modifies the other repository's code. A code change needed on the other side is passed to
+that session (or to the user), not made from here.
+
 ### 1. `circular` option values — must stay identical
 
 | here | card |
