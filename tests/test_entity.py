@@ -108,6 +108,17 @@ async def test_unknown_key_is_reported(hass: HomeAssistant, caplog):
     assert "unknown key 'tua'" in caplog.text
 
 
+async def test_debug_attributes(hass: HomeAssistant, clock):
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "debug": True, "max_rate_dt": 1, "deadband": 0.01}])
+    await feed(hass, clock, [(10, 12), (20, 14)])
+    attrs = hass.states.get(OUT).attributes
+    assert attrs["source"] == SRC
+    assert attrs["tau_filter"] == 10
+    assert set(attrs["deadband"]) >= {"deadband", "deadband_filtered_mean", "deadband_filtered_sigma"}
+    assert set(attrs["dt_output"]) == {"dt_output", "dt_output_mean", "dt_output_sigma"}
+
+
 # ------------------------------------------------------------------ filtering and publishing
 
 

@@ -43,6 +43,8 @@ class Publisher:
 
         self.clamped_to_source = False
         self.output_just_resumed = False
+        # total_increasing: the source was reset, the next lower value is accepted once
+        self.reset_pending = False
 
         self.decimals = None
 
@@ -142,7 +144,10 @@ class Publisher:
     # MAIN PUBLISH
     # ------------------------------------------------------------
     def publish(self, src_state, now, dt, force, injected):
-        """Publish filtered value to Home Assistant."""
+        """Publish filtered value to Home Assistant.
+
+        force: end-of-silence marker (the last source value, nudged so that the Recorder
+        stores it). injected: a synthetic sample during a silence."""
 
         s = self.sensor
         inj = self.sensor.injector
@@ -151,100 +156,21 @@ class Publisher:
         if injected:
             self.output_just_resumed = True
 
-        # ------------------------------------------------------------
-        # 1. Deadband
-        # ------------------------------------------------------------
         deadband = self.core.effective_deadband()
 
-        # ------------------------------------------------------------
-        # 2. Convergence detection
-        # ------------------------------------------------------------
+        # During a silence, once the output has converged to the last source value, it is
+        # published as that value exactly (and, by default, the injection stops)
+        converged = injected and self._check_convergence(last_src, deadband)
 
-        if injected:
-            converged = self._check_convergence(last_src, deadband)
-        else:
-            converged = False
-
-        # ------------------------------------------------------------
-        # 3. Publication rule
-        # ------------------------------------------------------------
         if not force and not converged and not self.should_publish(now):
             return
 
-        attrs = src_state.attributes or {}
-
-        # ------------------------------------------------------------
-        # 4. Compute dt_output
-        # ------------------------------------------------------------
-        if self.core.time_last_pub is None:
-            dt_output = None
-        else:
-            dt_output = max(0.0, now - self.core.time_last_pub)
-
-        # ------------------------------------------------------------
-        # 5. EMA(dt_output)
-        # ------------------------------------------------------------
+        dt_output = None if self.core.time_last_pub is None else max(0.0, now - self.core.time_last_pub)
         dt_output_sigma = self._update_dt_output_stats(dt_output)
 
-        # ------------------------------------------------------------
-        # 6. Standard HA fields
-        # ------------------------------------------------------------
-        unit = attrs.get("unit_of_measurement")
-        if unit is not None:
-            s._attr_native_unit_of_measurement = unit
-
-        icon = attrs.get("icon")
-        if icon is not None:
-            s._attr_icon = icon
-
-        device_class = attrs.get("device_class")
-        if device_class is not None:
-            s._attr_device_class = device_class
-
-        # Determine state_class:
-        # 1) Use source state_class if provided
-        # 2) Otherwise infer from device_class if provided
-
-        # Source state_class (if explicitly provided by source)
-        state_class = attrs.get("state_class")
-        if state_class is not None:
-            # Always trust explicit source state_class
-            s._attr_state_class = state_class
-
-        else:
-            # No state_class from source → infer from device_class if defined
-            if getattr(s, "_attr_state_class", None) is None:
-
-                if device_class in (
-                    "power",
-                    "current",
-                    "voltage",
-                    "temperature",
-                    "humidity",
-                    "pressure",
-                    "frequency",
-                    "signal_strength",
-                ):
-                    s._attr_state_class = "measurement"
-
-                elif device_class in (
-                    "energy",
-                    "gas",
-                    "water",
-                ):
-                    s._attr_state_class = "total"
-
-        # (unit / state_class only known now can make the source an angle)
-        s._resolve_auto_circular()
-
-
-        # ------------------------------------------------------------
+        s.sync_source_attributes(src_state.attributes or {})
 
         reported = float(self.core.y)
-
-        # ------------------------------------------------------------
-        # 7. Apply override if needed
-        # ------------------------------------------------------------
 
         was_clamped_to_source = self.clamped_to_source
         if converged:
@@ -258,73 +184,15 @@ class Publisher:
         if force:
             reported = float(last_src)
 
-        # ------------------------------------------------------------
-        # 8. Round reported value (filtered)
-        # ------------------------------------------------------------
-        if self.cfg.rounding is not None:
-            decimals = self.cfg.rounding
-        else:
-            self.decimals = _update_decimals(deadband, self.decimals)
-            decimals = self.decimals
-            
-        reported = round(reported, decimals)
-
-        # A circular value stays within [0, period): 359.9996 rounds to 0, not 360
-        if self.cfg.circular is not None:
-            reported = round(reported % self.cfg.circular, decimals)
-            if reported >= self.cfg.circular:
-                reported = 0.0
-
-        # ------------------------------------------------------------
-        # 9. Hack to force record to recorder
-        # ------------------------------------------------------------
+        reported, decimals = self._round(reported, deadband)
 
         if force:
-            if self.cfg.silence == "unknown":
-                reported = 0.0
-            elif self.cfg.silence in ("zero", "0"):
-                reported = 10 ** (-decimals-1)
-            else:
-                reported = reported + 10 ** (-decimals-1)
+            reported = self._marker_value(reported, decimals)
 
-            _LOGGER.debug(
-                "end-of-silence marker in publisher for %s last_source_value=%f",
-                s.entity_id,
-                reported,
-            )
+        if self._breaks_monotonicity(reported):
+            return
 
-        # ------------------------------------------------------------
-        # 10. Monoticity
-        # ------------------------------------------------------------
-
-        prev = s._attr_native_value
-
-        if (s._attr_state_class == "total_increasing" and prev is not None and reported < prev):
-            if self.sensor._reset_pending:
-
-                _LOGGER.info(
-                    "total_increasing monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
-                    s.entity_id,
-                    prev,
-                    reported,
-                )
-                self.sensor._reset_pending = False
-
-            else:
-                _LOGGER.debug(
-                    "total_increasing monotonicity break BLOCKED for %s: %.6f → %.6f",
-                    s.entity_id,
-                    prev,
-                    reported,
-                )
-
-                return
-
-
-        # ------------------------------------------------------------
-        # 11. Unknown / Zero
-        # ------------------------------------------------------------
-
+        # silence: zero / unknown — the plateau reached, the output shows 0 or nothing
         if was_clamped_to_source and self.cfg.silence in ("zero", "0", "unknown"):
             if self.cfg.silence in ("zero", "0") and s._attr_state_class not in ("total", "total_increasing"):
                 s._attr_native_value = 0.0
@@ -336,67 +204,124 @@ class Publisher:
         else:
             s._attr_native_value = reported
 
-
-        # ------------------------------------------------------------
-        # 12. Reset output_just_resumed after successful real publish
-        # ------------------------------------------------------------
-
+        # a real sample published: the silence is over
         if not injected and not force:
             self.output_just_resumed = False
 
-        # ------------------------------------------------------------
-        # 13. Attributes
-        # ------------------------------------------------------------
+        s._attr_extra_state_attributes = (
+            self._debug_attributes(dt, dt_output, dt_output_sigma)
+            if self.cfg.debug
+            else {"source": self.cfg.source}
+        )
 
-        if not self.cfg.debug:
-
-            # minimal attributes
-            s._attr_extra_state_attributes = {
-                "source": self.cfg.source,
-            }
-
-        else:
-
-            # full debug attributes
-            s._attr_extra_state_attributes = {
-                "source": self.cfg.source,
-                "unique_id": s._unique_id_seed,
-
-                "tau_filter": self.cfg.tau,
-                "max_rate_dt": self.cfg.max_rate_dt,
-                "min_rate_dt": self.cfg.min_rate_dt,
-                "filter_output": float(self.core.y),
-
-                "source_dt": {
-                    "source_dt": dt,
-                    "source_silence_3sigma": self.dt_silence,
-                    "silent": self.output_just_resumed,
-                },
-
-                "deadband": {
-                    "deadband": self.core.effective_deadband(),
-                    "deadband_tau_sigma": self.cfg.deadband_tau_sigma,
-                    **(
-                        {"deadband_k_sigma": self.cfg.deadband_k_sigma}
-                        if self.cfg.deadband is None
-                        else {}
-                    ),
-                "deadband_filtered_mean": self.core.src_mean,
-                "deadband_filtered_sigma": self.core.src_sigma,
-                },
-
-                "dt_output": {
-                    "dt_output": dt_output,
-                    "dt_output_mean": self.dt_output_mean,
-                    "dt_output_sigma": dt_output_sigma,
-                },
-            }
-
-        # ------------------------------------------------------------
-        # 14. Finalize
-        # ------------------------------------------------------------
         self.core.time_last_pub = now
         s.async_write_ha_state()
+
+    # ------------------------------------------------------------
+    # Rounding (fixed, or derived from the deadband)
+    # ------------------------------------------------------------
+    def _round(self, value, deadband):
+        if self.cfg.rounding is not None:
+            decimals = self.cfg.rounding
+        else:
+            self.decimals = _update_decimals(deadband, self.decimals)
+            decimals = self.decimals
+
+        value = round(value, decimals)
+
+        # A circular value stays within [0, period): 359.9996 rounds to 0, not 360
+        if self.cfg.circular is not None:
+            value = round(value % self.cfg.circular, decimals)
+            if value >= self.cfg.circular:
+                value = 0.0
+
+        return value, decimals
+
+    # ------------------------------------------------------------
+    # End-of-silence marker value
+    # ------------------------------------------------------------
+    def _marker_value(self, reported, decimals):
+        """The plateau's value, nudged below the displayed precision: Home Assistant would
+        not record a state equal to the current one."""
+        if self.cfg.silence == "unknown":
+            value = 0.0
+        elif self.cfg.silence in ("zero", "0"):
+            value = 10 ** (-decimals - 1)
+        else:
+            value = reported + 10 ** (-decimals - 1)
+
+        _LOGGER.debug(
+            "end-of-silence marker in publisher for %s last_source_value=%f",
+            self.sensor.entity_id,
+            value,
+        )
+        return value
+
+    # ------------------------------------------------------------
+    # total_increasing: never publish a lower value, except after a reset
+    # ------------------------------------------------------------
+    def _breaks_monotonicity(self, reported):
+        s = self.sensor
+        prev = s._attr_native_value
+
+        if s._attr_state_class != "total_increasing" or prev is None or reported >= prev:
+            return False
+
+        if self.reset_pending:
+            _LOGGER.info(
+                "total_increasing monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
+                s.entity_id,
+                prev,
+                reported,
+            )
+            self.reset_pending = False
+            return False
+
+        _LOGGER.debug(
+            "total_increasing monotonicity break BLOCKED for %s: %.6f → %.6f",
+            s.entity_id,
+            prev,
+            reported,
+        )
+        return True
+
+    # ------------------------------------------------------------
+    # Debug attributes
+    # ------------------------------------------------------------
+    def _debug_attributes(self, dt, dt_output, dt_output_sigma):
+        return {
+            "source": self.cfg.source,
+            "unique_id": self.sensor._unique_id_seed,
+
+            "tau_filter": self.cfg.tau,
+            "max_rate_dt": self.cfg.max_rate_dt,
+            "min_rate_dt": self.cfg.min_rate_dt,
+            "filter_output": float(self.core.y),
+
+            "source_dt": {
+                "source_dt": dt,
+                "source_silence_3sigma": self.dt_silence,
+                "silent": self.output_just_resumed,
+            },
+
+            "deadband": {
+                "deadband": self.core.effective_deadband(),
+                "deadband_tau_sigma": self.cfg.deadband_tau_sigma,
+                **(
+                    {"deadband_k_sigma": self.cfg.deadband_k_sigma}
+                    if self.cfg.deadband is None
+                    else {}
+                ),
+                "deadband_filtered_mean": self.core.src_mean,
+                "deadband_filtered_sigma": self.core.src_sigma,
+            },
+
+            "dt_output": {
+                "dt_output": dt_output,
+                "dt_output_mean": self.dt_output_mean,
+                "dt_output_sigma": dt_output_sigma,
+            },
+        }
 
     # ------------------------------------------------------------
     # Injected publication

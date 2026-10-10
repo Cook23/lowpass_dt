@@ -24,6 +24,19 @@ _LOGGER = logging.getLogger(__name__)
 
 _MISSING = object()
 
+# state_class inferred from the device_class, when the source has none
+_MEASUREMENT_DEVICE_CLASSES = (
+    "power",
+    "current",
+    "voltage",
+    "temperature",
+    "humidity",
+    "pressure",
+    "frequency",
+    "signal_strength",
+)
+_TOTAL_DEVICE_CLASSES = ("energy", "gas", "water")
+
 
 # ------------------------------------------------------------
 # Setup entry (wrapper): delegated to loader.py
@@ -79,7 +92,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self.publisher = Publisher(self, cfg, self.core)
 
         self._last_source_value = None
-        self._reset_pending = False
 
         # circular: period of the restored filter state, whether the current one was
         # auto-detected, and whether the entity is running (see _resolve_auto_circular)
@@ -425,6 +437,35 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         return LowpassExtraData(data)
 
     # ------------------------------------------------------------
+    # Unit, icon, device_class and state_class follow the source's
+    # ------------------------------------------------------------
+    def sync_source_attributes(self, attrs) -> None:
+        unit = attrs.get("unit_of_measurement")
+        if unit is not None:
+            self._attr_native_unit_of_measurement = unit
+
+        icon = attrs.get("icon")
+        if icon is not None:
+            self._attr_icon = icon
+
+        device_class = attrs.get("device_class")
+        if device_class is not None:
+            self._attr_device_class = device_class
+
+        # state_class: the source's, or else inferred from its device_class
+        state_class = attrs.get("state_class")
+        if state_class is not None:
+            self._attr_state_class = state_class
+        elif self._attr_state_class is None:
+            if device_class in _MEASUREMENT_DEVICE_CLASSES:
+                self._attr_state_class = "measurement"
+            elif device_class in _TOTAL_DEVICE_CLASSES:
+                self._attr_state_class = "total"
+
+        # (unit / state_class only known now can make the source an angle)
+        self._resolve_auto_circular()
+
+    # ------------------------------------------------------------
     # circular: automatic detection (circular absent / null / 'none')
     # ------------------------------------------------------------
     def _resolve_auto_circular(self) -> None:
@@ -500,7 +541,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.core.x_prev = x
             self.core.t_prev = now
 
-            self._reset_pending = True
+            self.publisher.reset_pending = True
 
         # Update filter with real measurement
         dt = self.core.update_from_source(x, now)
