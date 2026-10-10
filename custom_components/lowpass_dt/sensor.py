@@ -105,6 +105,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.core,
             lambda: self._last_source_value,
             self.publisher.publish_injected,
+            self.publisher.publish_tracked,
         )
 
         self._unsub_source = None

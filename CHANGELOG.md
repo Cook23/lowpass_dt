@@ -8,6 +8,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ## v1.4.0 (beta) — unreleased
 
+### Changed — no more delay of one sample on slow sources
+
+- **The output follows its course between samples.** With the zero-order hold, a new value is in effect from the moment it arrives, but the filter used to be computed only at the next sample (or once a silence was detected): on a slow source, the output stayed where it was for a whole period before moving — about 10 minutes on a weather sensor updated every 10 minutes. The output is now computed along its known course between samples (every `max_rate_dt`, or `tau` / 100 if longer) and published whenever it moves by the deadband, as usual. On sources reporting faster than that, nothing changes; on slow sources, the curve starts moving at once and gets a few more points along its way (in the tests: a weather sensor written 46 times instead of 24 over 8 hours, three times closer to the first-order curve).
+
 ### Changed — the exact first-order low-pass
 
 - **`alpha = 1 − exp(−dt / tau)`** instead of `dt / (tau + dt)`. The former is the exact solution of a first-order low-pass whose input is held over `dt` (zero-order hold); the latter was only close to it for `dt` small compared to `tau`. The output no longer depends on how often it is computed: one step of 5 minutes or sixty steps of 5 seconds give the same value, whatever the source's rhythm and the injections during a silence. In the normal regime (`tau` about 10 times the source's period) the change is barely visible; it matters when a source slows down beyond `tau` — a step on a source reporting every 10 minutes with `tau` = 2 minutes used to reach 83 % of the new value where the first order reaches 99 % — and for the curve right after a silence.

@@ -19,7 +19,4 @@ A change that would break this is redesigned, not merged.
 
 ## Planned
 
-From the October 2026 review (details in the review's tests, `tests/`):
-- proposal, low priority (it only matters once the source is slower than tau): while the
-  output moves, publish points paced by the deadband along its known exponential, so that
-  straight lines and splines between them redraw it;
+None at the moment: the October 2026 review is done (its tests are in `tests/`).

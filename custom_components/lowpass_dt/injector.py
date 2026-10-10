@@ -8,12 +8,19 @@ import math
 class TauInjector:
     """Adaptive tau injector with clean silence detection (no polling)."""
 
-    def __init__(self, hass, cfg, core, get_last_source, publish_callback):
+    def __init__(self, hass, cfg, core, get_last_source, publish_callback, track_callback=None):
         self.hass = hass
         self.cfg = cfg
         self.core = core
         self.get_last_source = get_last_source
         self.publish_callback = publish_callback
+        self.track_callback = track_callback
+
+        # Tracking between samples: the output follows its known course toward the last
+        # value as soon as it arrives, instead of waiting for the next sample (no pure delay
+        # of one sample on slow sources). One-shot timer, re-armed while the output moves.
+        self.unsub_track = None
+        self.track_step = max(1.0, float(cfg.max_rate_dt), float(cfg.tau) / 100.0)
 
         # Periodic injection timer
         self.unsub_injection = None
@@ -62,7 +69,44 @@ class TauInjector:
             self.unsub_injection()
             self.unsub_injection = None
 
+        self._cancel_tracking()
+
         self.silent = False
+
+    # ------------------------------------------------------------
+    # Tracking between samples
+    # ------------------------------------------------------------
+    def _cancel_tracking(self):
+        if self.unsub_track is not None:
+            self.unsub_track()
+            self.unsub_track = None
+
+    def restart_tracking(self):
+        self._cancel_tracking()
+        if self._stopped or self.silent or self.track_callback is None:
+            return
+        self.unsub_track = async_call_later(self.hass, self.track_step, self._on_track)
+
+    @callback
+    def _on_track(self, _):
+        self.unsub_track = None
+        if self._stopped or self.silent:
+            return
+        last_source_value = self.get_last_source()
+        if last_source_value is None or self.core.y is None:
+            return
+
+        now = dt_util.utcnow().timestamp()
+        dt = self.core.update_synthetic(last_source_value, now)
+        self.track_callback(last_source_value, now, dt)
+
+        # keep following while the output is still away from the source by a deadband
+        # (the rest, below the deadband, is left to the integral term and the silence)
+        diff = self.core.y - last_source_value
+        if self.cfg.circular is not None:
+            diff = ((diff + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
+        if abs(diff) >= self.core.effective_deadband():
+            self.unsub_track = async_call_later(self.hass, self.track_step, self._on_track)
 
     # ------------------------------------------------------------
     # Called at every real measurement
@@ -90,8 +134,9 @@ class TauInjector:
         self.source_just_resumed = False
         self.t_last_source = t
 
-        # Schedule new silence detection
+        # Schedule new silence detection, and follow the output until then
         self.hass.loop.call_soon(self.restart_silence_timer)
+        self.hass.loop.call_soon(self.restart_tracking)
 
     # ------------------------------------------------------------
     # Update EMA stats for dt_source
@@ -152,6 +197,7 @@ class TauInjector:
     def _on_silence_detected(self, _):
         self.unsub_silence = None
         self.silent = True
+        self._cancel_tracking()
 
         # Immediate injection
         self._inject_once()

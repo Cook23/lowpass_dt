@@ -330,7 +330,7 @@ class Publisher:
     # ------------------------------------------------------------
     # Injected publication
     # ------------------------------------------------------------
-    def publish_injected(self, last_source_value, now, dt):
+    def publish_injected(self, last_source_value, now, dt, injected=True):
         src = self.sensor.hass.states.get(self.cfg.source)
         attrs = src.attributes if src else {}
 
@@ -339,4 +339,10 @@ class Publisher:
             state=str(last_source_value),
         )
 
-        self.publish(fake, now, dt, force=False, injected=True)
+        self.publish(fake, now, dt, force=False, injected=injected)
+
+    # ------------------------------------------------------------
+    # Output followed between samples (not a silence): the usual publication rules
+    # ------------------------------------------------------------
+    def publish_tracked(self, last_source_value, now, dt):
+        self.publish_injected(last_source_value, now, dt, injected=False)

@@ -435,6 +435,34 @@ async def test_power_cycling_consumer_written_each_time(hass: HomeAssistant, fre
     no_static_error(hass, stored, samples)
 
 
+# ------------------------------------------------------------------ slow sources (weather)
+
+
+async def test_slow_source_new_value_moves_output_at_once(hass: HomeAssistant, freezer):
+    """A weather sensor reporting every 10 min or so, tau = 100 min: a new value starts
+    moving the output at once, along its known course, not one sample (10 min) later —
+    and the curve stays the first-order filter, with few writes."""
+    rng = random.Random(6)
+    tau, t_end = 6000.0, 8 * 3600.0
+    samples, t = [], 0.0
+    while t < t_end - 3600:
+        level = 10.0 if t < 2 * 3600 else 15.0
+        samples.append((t, round(level + rng.gauss(0, 0.05), 2)))
+        t += rng.uniform(540, 660)
+    t_new = next(t for t, _ in samples if t >= 2 * 3600)
+    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.1}, t_end)
+    s = report("weather", samples, stored, tau, t_end)
+    delay = next(t for t, v in stored if t > t_new and v > held(stored, t_new) + 0.05) - t_new
+    # the ideal output itself needs this long to move by the deadband (0.1 of a 5° step)
+    t_cross = -tau * math.log(1 - 0.1 / 5.0)
+    step = max(1.0, 10.0, tau / 100)                  # the tracking step (max_rate_dt 10 s)
+    print(f"first move after the new value: {delay:.0f} s (ideal crosses the deadband at {t_cross:.0f} s)")
+    assert delay <= t_cross + step + 1               # not ~600 s (the next sample)
+    assert s["max_err_at_writes"] < 2 * 0.1
+    assert s["max_err_linear"] < 0.5
+    assert s["writes"] < 150
+
+
 # ------------------------------------------------------------------ slowed-down regime
 
 

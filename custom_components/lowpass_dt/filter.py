@@ -40,6 +40,10 @@ class LowpassCore:
         # sigma horizon start (None = just started / no restore)
         self.t_sigma_start = None
 
+        # time of the last real sample: the σ statistics weigh real samples by the time
+        # between them, whatever was computed in between (injection, tracking)
+        self.t_last_real = None
+
     # ------------------------------------------------------------
     # Update filter from real source value
     # ------------------------------------------------------------
@@ -48,6 +52,7 @@ class LowpassCore:
         if self.y is None:
             self.y = x % self.cfg.circular if self.cfg.circular is not None else x
             self.t_prev = now
+            self.t_last_real = now
             self.x_prev = x
             self.t_sigma_start = now
 
@@ -101,7 +106,9 @@ class LowpassCore:
             elapsed = max(0.0, now - self.t_sigma_start)
             tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
 
-        beta = (dt / (tau_s_dynamic + dt)) if (tau_s_dynamic + dt) > 0 else 0.1
+        dt_real = max(0.0, now - self.t_last_real) if self.t_last_real is not None else dt
+        self.t_last_real = now
+        beta = (dt_real / (tau_s_dynamic + dt_real)) if (tau_s_dynamic + dt_real) > 0 else 0.1
 
         if self.src_mean is None:
             self.src_mean = self.y

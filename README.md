@@ -21,7 +21,8 @@
 > - **a broad pattern** such as `sensor.*` no longer filters the filtered entities themselves.
 > - **the silence injection runs in Home Assistant's event loop**, no longer in a worker thread: a silence always ends the same way;
 > - **patterns** keep the filtered entity of a source without `unique_id` across restarts, scan again after a reload of the integration, and leave out sources that are not numbers (dates, text);
-> - **fewer warnings** in the log: normal events are logged at a lower level, warnings are kept for configuration errors.
+> - **fewer warnings** in the log: normal events are logged at a lower level, warnings are kept for configuration errors;
+> - **the exact first-order low-pass**, whatever the source's rhythm, and **no more delay of one sample** on slow sources (weather): a new value moves the output at once.
 >
 > **To try it**, enable *Show beta versions* for this repository in HACS and download the latest 1.4; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
 >
@@ -112,7 +113,7 @@ y[n]     = y[n-1] + alpha[n] * (x[n-1] - y[n-1])
 
 The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical. With `alpha = 1 - exp(-dt / tau)` — the exact solution of a first-order low-pass whose input is held over `dt` — the result does not depend on how the time is split: one step of 5 minutes or sixty steps of 5 seconds give the same output.
 
-The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the time that has just elapsed — is applied to `x[n-1]`, the value that was actually in effect during that interval, not to the newly arrived `x[n]`. The new sample only becomes "the value in effect" for the *next* interval. This matters for sparse or impulsive signals: a short-lived spike arriving after a long silence is not mistakenly weighted as if it had lasted the whole preceding interval. The trade-off is a one-sample delay, which is negligible for continuous, regularly-sampled signals and only becomes visible on sparse, spiky sources — exactly the case it was designed to fix.
+The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the time that has just elapsed — is applied to `x[n-1]`, the value that was actually in effect during that interval, not to the newly arrived `x[n]`. The new sample only becomes "the value in effect" for the *next* interval. This matters for sparse or impulsive signals: a short-lived spike arriving after a long silence is not mistakenly weighted as if it had lasted the whole preceding interval. Between two samples, the output follows its known course toward the value in effect, and is published whenever it moves by the deadband: on a slow source (weather updated every 10 minutes), a new value moves the output at once instead of one sample later.
 
 - No sample-rate dependency.
 - No overshoot. No instability.
