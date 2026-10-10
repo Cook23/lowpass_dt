@@ -213,3 +213,49 @@ async def test_pattern_with_attribute(hass: HomeAssistant):
     assert hass.states.get("sensor.lp_bureau_current_temperature") is not None
     ids = sorted(e.entity_id for e in er.async_get(hass).entities.values() if e.platform == "lowpass_dt")
     assert ids == ["sensor.lp_bureau_current_temperature", "sensor.lp_salon", "sensor.lp_salon_current_temperature"]
+
+
+# ------------------------------------------------------------
+# Short form and overrides
+# ------------------------------------------------------------
+async def test_attribute_written_after_the_entity_id(hass: HomeAssistant):
+    """As in history-explorer-card: climate.salon.current_temperature."""
+    hass.states.async_set("climate.salon", "heat", CLIMATE)
+    await setup_lowpass(hass, sensors=[{"source": "climate.salon.current_temperature"}])
+    st = hass.states.get("sensor.lp_salon_current_temperature")
+    assert float(st.state) == pytest.approx(20.1)
+    assert st.attributes["source"] == "climate.salon"
+
+
+async def test_overrides_of_an_attribute(hass: HomeAssistant):
+    hass.states.async_set("sensor.box", "ok", {"friendly_name": "Box", "level": 42, "speed": 3})
+    await setup_lowpass(hass, sensors=[
+        {"source": "sensor.box", "attribute": "level", "unit": "%", "device_class": "moisture"},
+        {"source": "sensor.box", "attribute": "speed", "unit": "km/h"},
+    ])
+    level = hass.states.get("sensor.lp_box_level").attributes
+    assert level["unit_of_measurement"] == "%"
+    assert level["device_class"] == "moisture"
+    assert level["state_class"] == "measurement"
+    # (the device_class derived from the unit set)
+    assert hass.states.get("sensor.lp_box_speed").attributes["device_class"] == "speed"
+
+
+async def test_overrides_of_a_state(hass: HomeAssistant):
+    hass.states.async_set("sensor.src", "5", {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
+    await setup_lowpass(hass, sensors=[{"source": "sensor.src", "unit": "kW", "device_class": "none", "state_class": "total"}])
+    hass.states.async_set("sensor.src", "6", {"unit_of_measurement": "W", "device_class": "power", "state_class": "measurement"})
+    await hass.async_block_till_done()
+    a = hass.states.get("sensor.lp_src").attributes
+    assert a["unit_of_measurement"] == "kW"
+    assert "device_class" not in a
+    assert a["state_class"] == "total"
+
+
+def test_invalid_overrides_are_ignored(caplog):
+    from custom_components.lowpass_dt.config import build_cfg
+
+    cfg = build_cfg({"device_class": "nope", "state_class": "MEASUREMENT", "unit": ""}, source="sensor.x")
+    assert cfg.device_class is None and cfg.unit is None
+    assert cfg.state_class == "measurement"
+    assert "Invalid device_class" in caplog.text and "Invalid unit" in caplog.text

@@ -6,11 +6,15 @@ import re
 
 from dataclasses import dataclass
 
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.core import HomeAssistant
 
 from .const import (
     CONF_ATTRIBUTE,
     CONF_DEADBAND,
+    CONF_DEVICE_CLASS,
+    CONF_STATE_CLASS,
+    CONF_UNIT,
     CONF_DEADBAND_K_SIGMA,
     CONF_DEADBAND_TAU_SIGMA,
     CONF_MAX_RATE_DT,
@@ -93,6 +97,11 @@ class LowpassCfg:
     # filter this attribute of the source instead of its state
     attribute: str | None = None
 
+    # overrides of what the source gives or what is derived ('none': none at all)
+    unit: str | None = None
+    device_class: str | None = None
+    state_class: str | None = None
+
     @property
     def key(self) -> str:
         """What the filter reads: the source, or the source and one of its attributes."""
@@ -110,6 +119,20 @@ class CfgMeta:
     use_name: bool
     unique_id: str
     unique_id_seed: str
+
+
+# ------------------------------------------------------------
+# device_class / state_class override: a value Home Assistant knows, or 'none'
+# ------------------------------------------------------------
+def _class_override(item: dict, key: str, enum, source: str) -> str | None:
+    raw = item.get(key)
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if value == "none" or value in {str(v) for v in enum}:
+        return value
+    _LOGGER.warning("Invalid %s=%r for source=%r, ignored (expected one of Home Assistant's, or none)", key, raw, source)
+    return None
 
 
 # ------------------------------------------------------------
@@ -259,7 +282,8 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             _LOGGER.warning("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
             silence = None
 
-    # attribute (a non-empty string)
+    # attribute (a non-empty string), or written after the entity_id as in
+    # history-explorer-card: climate.salon.current_temperature (an entity_id has one dot)
     attribute = item.get(CONF_ATTRIBUTE)
     if attribute is not None:
         if isinstance(attribute, str) and attribute.strip():
@@ -267,10 +291,31 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         else:
             _LOGGER.warning("Invalid attribute=%r, must be a non-empty string, filtering the state of %r", attribute, source)
             attribute = None
+    parts = source.split(".", 2)
+    if len(parts) == 3:
+        if attribute is not None and attribute != parts[2]:
+            _LOGGER.warning("source=%r names attribute %r, but attribute=%r: using %r", source, parts[2], attribute, attribute)
+        source = f"{parts[0]}.{parts[1]}"
+        attribute = attribute or parts[2]
+
+    # unit (a non-empty string)
+    unit = item.get(CONF_UNIT)
+    if unit is not None:
+        if isinstance(unit, str) and unit.strip():
+            unit = unit.strip()
+        else:
+            _LOGGER.warning("Invalid unit=%r, must be a non-empty string, ignored for source=%r", unit, source)
+            unit = None
+
+    device_class = _class_override(item, CONF_DEVICE_CLASS, SensorDeviceClass, source)
+    state_class = _class_override(item, CONF_STATE_CLASS, SensorStateClass, source)
 
     return LowpassCfg(
         source=source,
         attribute=attribute,
+        unit=unit,
+        device_class=device_class,
+        state_class=state_class,
         tau=tau,
         name=name,
         circular=circular,

@@ -250,14 +250,26 @@ def is_circular_attribute(attribute: str) -> bool:
 # ------------------------------------------------------------
 # What the filtered entity takes from the source, for an attribute
 # ------------------------------------------------------------
-def derived_attributes(temperature_unit: str | None, source: str, attribute: str, attrs) -> dict:
+def derived_attributes(
+    temperature_unit: str | None,
+    source: str,
+    attribute: str,
+    attrs,
+    unit: str | None = None,
+    device_class: str | None = None,
+) -> dict:
     """unit_of_measurement, device_class and state_class of a filtered attribute — never
-    the source entity's own (a weather entity's state is its condition)."""
+    the source entity's own (a weather entity's state is its condition). unit and
+    device_class: set by the user, instead of derived ('none': no device_class)."""
     attrs = attrs or {}
     domain = source.split(".", 1)[0]
-    value, value_unit = attribute_value(source, attribute, attrs)
-    unit = value_unit or _attribute_unit(temperature_unit, domain, attribute, attrs)
-    device_class = derive_device_class(domain, attribute, unit)
+    if unit is None:
+        value, value_unit = attribute_value(source, attribute, attrs)
+        unit = value_unit or _attribute_unit(temperature_unit, domain, attribute, attrs)
+    if device_class is None:
+        device_class = derive_device_class(domain, attribute, unit)
+    elif device_class == "none":
+        device_class = None
     out = {"device_class": device_class, "state_class": derive_state_class(device_class)}
     if unit:
         out["unit_of_measurement"] = unit

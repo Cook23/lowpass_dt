@@ -183,8 +183,20 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self.cfg.source,
                 self.cfg.attribute,
                 attrs,
+                unit=self.cfg.unit,
+                device_class=self.cfg.device_class,
             )
         return attrs
+
+    def _apply_overrides(self) -> None:
+        """unit, device_class and state_class set in the configuration win over the source's."""
+        cfg = self.cfg
+        if cfg.unit is not None:
+            self._attr_native_unit_of_measurement = cfg.unit
+        if cfg.device_class is not None:
+            self._attr_device_class = None if cfg.device_class == "none" else cfg.device_class
+        if cfg.state_class is not None:
+            self._attr_state_class = None if cfg.state_class == "none" else cfg.state_class
 
 
     # ------------------------------------------------------------
@@ -254,6 +266,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if state_class:
             self._attr_state_class = state_class
 
+        self._apply_overrides()
         self._resolve_auto_circular()
 
         if self.cfg.circular is not None and self._attr_state_class == "total_increasing":
@@ -282,6 +295,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             device_class = source_attrs.get("device_class")
         if device_class:
             self._attr_device_class = device_class
+        self._apply_overrides()
 
         # ---- VALUE ----
         if last_state and last_state.state not in ("unknown", "unavailable"):
@@ -477,7 +491,10 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self._attr_icon = icon
 
         device_class = attrs.get("device_class")
-        if device_class is not None:
+        if self.cfg.device_class is not None:
+            device_class = self.cfg.device_class
+        if device_class is not None or self.cfg.attribute:
+            # (derived for an attribute: none is a result too)
             self._attr_device_class = device_class
 
         # state_class: the source's, or else inferred from its device_class
@@ -489,6 +506,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self._attr_state_class = "measurement"
             elif device_class in _TOTAL_DEVICE_CLASSES:
                 self._attr_state_class = "total"
+
+        self._apply_overrides()
 
         # (unit / state_class only known now can make the source an angle)
         self._resolve_auto_circular()

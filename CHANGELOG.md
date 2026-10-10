@@ -13,6 +13,11 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 - **`attribute:`** (in `sensors:` and `patterns:`): the filter reads that attribute of the source instead of its state — a weather's `wind_speed`, a thermostat's `current_temperature`, the sun's `azimuth`. The filtered entity is an ordinary sensor, `sensor.lp_<source>_<attribute>`, named "*Source : Attribute (Filtered)*". Only a new value of the attribute is a sample. A pattern with `attribute` applies to entities of every domain that have it.
 - **Unit** as in [history-explorer-card](https://github.com/Cook23/history-explorer-card): the one the value gives (`12.5 °C`), else the one Home Assistant shows the attribute in (a weather's `*_unit` attributes, Home Assistant's temperature unit, `%` for a brightness or a position, an `X_unit` attribute).
 - **Device class and state class** derived from the unit, the source's domain, then the attribute's name; `measurement` unless the device class requires otherwise. An attribute in `°` is circular only when its name says it is an angle around a circle (`bearing`, `azimuth`…), not a sun's elevation.
+- **Written after the entity_id**, as in the card: `source: climate.salon.current_temperature` is the same as `attribute: current_temperature`.
+
+### Added — `unit`, `device_class` and `state_class`
+
+- Set on any filtered entity — a state or an attribute — they win over the source's or the derived ones (`none` for no device class or state class). With `unit:` alone on an attribute, the device class is derived from that unit. An invalid value is ignored with a warning.
 
 ### Fixed — timers started right after each sample
 

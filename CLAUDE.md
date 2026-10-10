@@ -127,6 +127,8 @@ Common rule: the unit is the one the value gives (`12.5 °C`, comma decimal acce
 the weather table (`*_unit` attributes), the domain table (with factors: brightness × 100/255,
 volume_level × 100), Home Assistant's temperature unit for the temperature attributes, else
 the `X_unit` attribute of the longest X the name contains. An `X_unit` attribute has no unit.
+Both accept the attribute written after the entity_id (`climate.salon.current_temperature`:
+an entity_id has a single dot), and a `unit:` option that always wins.
 
 Differences:
 - Here `wind_bearing` of a weather entity is in `°` (so that it is detected as circular); the
