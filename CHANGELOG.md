@@ -6,6 +6,12 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ---
 
+## v1.4.1 (beta) — unreleased
+
+### Fixed — timers started right after each sample
+
+- After each sample, the silence timer and the tracking between samples were started on the next turn of Home Assistant's event loop instead of at once — a leftover of the time the injection ran in a worker thread. They are now started at once, so the timing no longer depends on how busy the loop is. No visible change in normal use; it makes the behavior reproducible on every Home Assistant version tested.
+
 ## v1.4.0 (beta)
 
 ### Fixed — a new filtered entity had no silence detection until the next restart

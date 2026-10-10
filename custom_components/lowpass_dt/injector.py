@@ -134,9 +134,11 @@ class TauInjector:
         self.source_just_resumed = False
         self.t_last_source = t
 
-        # Schedule new silence detection, and follow the output until then
-        self.hass.loop.call_soon(self.restart_silence_timer)
-        self.hass.loop.call_soon(self.restart_tracking)
+        # Schedule new silence detection, and follow the output until then (directly:
+        # both timers fire later anyway, and a deferred call would start them a variable
+        # time after the sample)
+        self.restart_silence_timer()
+        self.restart_tracking()
 
     # ------------------------------------------------------------
     # Update EMA stats for dt_source
@@ -203,7 +205,7 @@ class TauInjector:
         self._inject_once()
 
         # Start periodic injection
-        self.hass.loop.call_soon(self._start_periodic_injection)
+        self._start_periodic_injection()
 
     # ------------------------------------------------------------
     # Inject once
