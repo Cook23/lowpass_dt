@@ -7,7 +7,6 @@ import re
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.restore_state import ExtraStoredData
@@ -131,14 +130,18 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._unique_id_seed = meta.unique_id_seed
 
         # ------------------------------------------------------------
-        # ENTITY_ID / suggested_object_id
+        # ENTITY_ID
         # ------------------------------------------------------------
+        # Set before the entity is added: Home Assistant takes it as the entity_id of a
+        # new registry entry, and keeps the registered one (renamed by the user, or
+        # suffixed on a collision) for an existing entry.
         if use_name:
             object_id = slug
         else:
             object_id = f"{cfg.prefix}{object_id_src}"
 
-        self._attr_suggested_object_id = object_id
+        self.entity_id = f"sensor.{object_id}"
+        self._object_id = object_id
 
         # ------------------------------------------------------------
         # FRIENDLY NAME
@@ -183,6 +186,9 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         await super().async_added_to_hass()
 
+        # (the entity can be removed and added again, when its entity_id is changed)
+        self.injector.start()
+
         # ------------------------------------------------------------
         # Restore extra_data
         # ------------------------------------------------------------
@@ -191,7 +197,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if data:
             self._restore_internal_state(data.as_dict())
         else:
-            if self.entity_id == f"sensor.{self._attr_suggested_object_id}":
+            if self.entity_id == f"sensor.{self._object_id}":
                 _LOGGER.warning("context lost or new entity for %r (empty filter state).", self.entity_id)
 
         # ------------------------------------------------------------
@@ -199,25 +205,6 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # ------------------------------------------------------------
         self.injector.source_just_resumed = True
         self.publisher.output_just_resumed = True
-
-        # ------------------------------------------------------------
-        # Rename via registry (deferred, safe)
-        # ------------------------------------------------------------
-        async def _deferred_rename():
-            registry = er.async_get(self.hass)
-            entry = registry.async_get(self.entity_id)
-
-            if entry:
-                desired_entity_id = f"sensor.{self._attr_suggested_object_id}"
-
-                if entry.entity_id != desired_entity_id:
-                    registry.async_update_entity(
-                        entry.entity_id,
-                        new_entity_id=desired_entity_id,
-                    )
-
-        self.hass.async_create_task(_deferred_rename())
-
 
         # ------------------------------------------------------------
         # Restore last visible state (robust + immediate write)

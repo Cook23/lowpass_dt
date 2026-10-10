@@ -12,6 +12,18 @@
 > Works well in my environment. May break yours. Back up Home Assistant before installing.
 > Extensive logging is intentional during this validation phase and will be reduced in future stable versions.
 
+> [!IMPORTANT]
+> **This is version 1.4, a beta**
+>
+> The **1.4** line is published as a beta (pre-release) alongside the **1.3** line, which remains the recommended version. It follows a full review of the code, and makes the integration cleaner and more reliable. What 1.4 changes today:
+> - **a new filtered entity detects silences at once** — it used to wait for the next restart of Home Assistant;
+> - **an entity_id renamed in Home Assistant is kept**, instead of being set back;
+> - **a broad pattern** such as `sensor.*` no longer filters the filtered entities themselves.
+>
+> **To try it**, enable *Show beta versions* for this repository in HACS and download the latest 1.4; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
+>
+> *Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
+
 ---
 
 ## 📋 Version highlights

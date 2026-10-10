@@ -6,6 +6,16 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ---
 
+## v1.4.0 (beta) — unreleased
+
+### Fixed — a new filtered entity had no silence detection until the next restart
+
+- **No silence detection on a new entity.** A new filtered entity was first registered under an id taken from its name (`sensor.temperature_filtered`), then renamed to its real id (`sensor.lp_temperature`). Home Assistant removes and re-adds an entity to rename it, and the removal stopped the silence detection for good: until the next restart, a silent source left the filtered value where it was. The entity is now registered directly under its real id.
+- **An entity_id renamed in Home Assistant is kept.** It used to be set back at once to `lp_…`, and the rename also stopped the silence detection. The silence detection now starts again whenever the entity is re-added.
+- **A broad pattern filtered the filtered entities.** With a pattern such as `sensor.*`, the temporary id of a new filtered entity was not recognized as one of the integration's own: it was filtered again, and so on (`lp_lp_lp_…`), up to 100 entities or an error. Every entity of the integration is now recognized, even renamed.
+
+---
+
 ## v1.3.17
 
 ### New — angles detected automatically (`circular`)

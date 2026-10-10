@@ -100,6 +100,13 @@ async def async_setup_entry_loader(
         e.entity_id for e in reg0.entities.values() if e.platform == DOMAIN
     }
 
+    def _is_own(eid: str) -> bool:
+        """A lowpass_dt entity: never filtered again (recursion guard)."""
+        if eid in own_entity_ids:
+            return True
+        reg_entry = er.async_get(hass).async_get(eid)
+        return reg_entry is not None and reg_entry.platform == DOMAIN
+
     # ------------------------------------------------------------
     # Build explicit configs
     # ------------------------------------------------------------
@@ -144,9 +151,6 @@ async def async_setup_entry_loader(
 
     for ent in explicit_entities:
         own_entity_ids.add(ent.entity_id)
-        suggested = getattr(ent, "_attr_suggested_object_id", None)
-        if suggested:
-            own_entity_ids.add(f"sensor.{suggested}")
 
     # ------------------------------------------------------------
     # Initial pattern matching (executed after HA fully started)
@@ -202,8 +206,8 @@ async def async_setup_entry_loader(
                 if st.state in (None, "unavailable"):
                     continue
 
-                # Recursion protection (entity_id only)
-                if eid in own_entity_ids:
+                # Recursion protection: never filter a lowpass_dt entity
+                if _is_own(eid):
                     _LOGGER.warning("patterns[]: match=%r includes lowpass sensor %r. Skipped to avoid recursion.", pat, eid)
                     continue
 
@@ -269,9 +273,6 @@ async def async_setup_entry_loader(
 
             for ent in entities:
                 own_entity_ids.add(ent.entity_id)
-                suggested = getattr(ent, "_attr_suggested_object_id", None)
-                if suggested:
-                    own_entity_ids.add(f"sensor.{suggested}")
 
     unsub = hass.bus.async_listen_once(
         "homeassistant_started",
@@ -314,7 +315,7 @@ async def async_setup_entry_loader(
             if not fnmatch.fnmatch(new_eid, pat):
                 continue
 
-            if new_eid in own_entity_ids:
+            if _is_own(new_eid):
                 return
 
             cfg = build_cfg(
@@ -346,10 +347,6 @@ async def async_setup_entry_loader(
             async_add_entities([ent])
 
             own_entity_ids.add(ent.entity_id)
-
-            suggested = getattr(ent, "_attr_suggested_object_id", None)
-            if suggested:
-                own_entity_ids.add(f"sensor.{suggested}")
 
             break
 
