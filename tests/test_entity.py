@@ -108,6 +108,34 @@ async def test_unknown_key_is_reported(hass: HomeAssistant, caplog):
     assert "unknown key 'tua'" in caplog.text
 
 
+async def test_debug_attributes(hass: HomeAssistant, clock):
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "debug": True, "max_rate_dt": 1, "deadband": 0.01}])
+    await feed(hass, clock, [(10, 12), (20, 14)])
+    attrs = hass.states.get(OUT).attributes
+    assert attrs["source"] == SRC
+    assert attrs["tau_filter"] == 10
+    assert set(attrs["deadband"]) >= {"deadband", "deadband_filtered_mean", "deadband_filtered_sigma"}
+    assert set(attrs["dt_output"]) == {"dt_output", "dt_output_mean", "dt_output_sigma"}
+
+
+async def test_friendly_name_follows_a_renamed_source(hass: HomeAssistant, clock):
+    """Renaming the source (its friendly name) renames the filtered entity at once, not only
+    after a restart; the source's values alone never cause a write."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 5}])
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(10, 60, 10)])
+    assert writes == []                                    # values under the deadband
+    await feed(hass, clock, [(70, 10.001)], {**ATTRS, "friendly_name": "Kitchen"})
+    assert hass.states.get(OUT).attributes["friendly_name"] == "Kitchen (Filtered)"
+    await feed(hass, clock, [(80, 10.002)], {**ATTRS, "friendly_name": "Kitchen oven"})
+    assert hass.states.get(OUT).attributes["friendly_name"] == "Kitchen oven (Filtered)"
+    n = len(writes)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(90, 140, 10)], {**ATTRS, "friendly_name": "Kitchen oven"})
+    assert len(writes) == n                                # same name: no write
+
+
 # ------------------------------------------------------------------ filtering and publishing
 
 
