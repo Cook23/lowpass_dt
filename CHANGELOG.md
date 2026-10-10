@@ -28,6 +28,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - **The first value had one decimal more than the next ones.** With the dynamic rounding (no `round` set), the number of decimals is derived from the deadband, with a hysteresis so that it does not flicker. The first value used a different formula, which gave one decimal more than every following value with the same deadband. Both now agree.
 
+### Fixed — `deadband_tau_sigma` had no effect on entities created since March 2026
+
+- **The time constant of the σ estimate stayed at its minimum.** The adaptive deadband estimates σ with an EMA whose time constant starts at 10 × `tau` and grows with time up to `deadband_tau_sigma`. Its starting time was only recorded when the filter had no value yet — but since March 2026 the filter gets its value (last state, or the source's) before any sample. On every entity created since, the time constant stayed at 10 × `tau`, and `deadband_tau_sigma` changed nothing; the "Publish blocked by max_rate_dt" message never appeared. Entities created before kept their starting time across restarts and were not affected. The starting time is now recorded at the first sample, including on entities saved without it.
+
 ### Changed — fewer warnings in the log
 
 - Normal events are no longer logged as warnings: a new filtered entity, the removal of an orphan, a broad pattern skipping the integration's own entities (debug), a publish held back by `max_rate_dt` (debug), a `total_increasing` value held back (debug) or accepted after a reset. Warnings are kept for configuration errors.
