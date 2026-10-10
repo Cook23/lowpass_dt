@@ -35,6 +35,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
+- **v1.3.18** — Bug fixes from the 1.4 review: new filtered entities created reliably on recent Home Assistant versions, silence injection in the event loop, `deadband_tau_sigma` effective again, safer patterns; tested on Home Assistant 2025.1 to 2026.10.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
 - **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
 - **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
@@ -174,6 +175,10 @@ The deadband threshold is estimated from the signal's own variability over time.
 ---
 
 ## 📦 Install
+
+### Home Assistant versions
+
+Since 1.3.18, the integration is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older ones are not tested.
 
 ### HACS (recommended)
 

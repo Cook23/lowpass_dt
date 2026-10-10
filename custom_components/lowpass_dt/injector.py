@@ -1,3 +1,4 @@
+from homeassistant.core import callback
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
@@ -37,6 +38,12 @@ class TauInjector:
         self.silent = False
 
         # Manage unload
+        self._stopped = False
+
+    # ------------------------------------------------------------
+    # Start (again, after stop: the entity can be removed and added again)
+    # ------------------------------------------------------------
+    def start(self):
         self._stopped = False
 
     # ------------------------------------------------------------
@@ -83,8 +90,9 @@ class TauInjector:
         self.source_just_resumed = False
         self.t_last_source = t
 
-        # Schedule new silence detection
-        self.hass.loop.call_soon(self.restart_silence_timer)
+        # Schedule new silence detection (directly: the timer fires later anyway, and a
+        # deferred call would start it a variable time after the sample)
+        self.restart_silence_timer()
 
     # ------------------------------------------------------------
     # Update EMA stats for dt_source (NO LOGIC CHANGE)
@@ -139,6 +147,9 @@ class TauInjector:
     # ------------------------------------------------------------
     # Silence detected (one-shot)
     # ------------------------------------------------------------
+    # (@callback: Home Assistant runs a timer's plain function in a worker thread,
+    # where it would change the filter state while the event loop uses it)
+    @callback
     def _on_silence_detected(self, _):
         self.unsub_silence = None
         self.silent = True
@@ -147,10 +158,10 @@ class TauInjector:
         self._inject_once()
 
         # Start periodic injection
-        self.hass.loop.call_soon(self._start_periodic_injection)
+        self._start_periodic_injection()
 
     # ------------------------------------------------------------
-    # Inject once (NO LOGIC CHANGE)
+    # Inject once
     # ------------------------------------------------------------
     def _inject_once(self):
         now = dt_util.utcnow().timestamp()
@@ -164,12 +175,7 @@ class TauInjector:
 
         dt = self.core.update_synthetic(last_source_value, now)
 
-        self.hass.loop.call_soon_threadsafe(
-            self.publish_callback,
-            last_source_value,
-            now,
-            dt,
-        )
+        self.publish_callback(last_source_value, now, dt)
 
     # ------------------------------------------------------------
     # Start periodic injection
@@ -195,6 +201,7 @@ class TauInjector:
     # ------------------------------------------------------------
     # Periodic injection tick
     # ------------------------------------------------------------
+    @callback
     def _tick(self, _):
         """Inject synthetic updates while silence persists."""
 

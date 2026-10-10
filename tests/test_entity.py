@@ -3,7 +3,7 @@ import threading
 from datetime import timedelta
 
 import pytest
-from homeassistant.core import HomeAssistant, State, callback
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -43,23 +43,6 @@ class Clock:
 @pytest.fixture
 def clock(hass, freezer):
     return Clock(hass, freezer)
-
-
-@pytest.fixture
-def injector_in_loop(monkeypatch):
-    """Runs the injector's timer callbacks in the event loop, as @callback would (the fix
-    for test_injection_runs_in_a_worker_thread). Without it, the silence tests below are
-    flaky: the result depends on how the worker thread interleaves with the loop."""
-    for name in ("_on_silence_detected", "_tick"):
-        orig = getattr(TauInjector, name)
-
-        def make(f):
-            @callback
-            def wrapper(self, *args):
-                return f(self, *args)
-            return wrapper
-
-        monkeypatch.setattr(TauInjector, name, make(orig))
 
 
 @pytest.fixture
@@ -125,6 +108,34 @@ async def test_unknown_key_is_reported(hass: HomeAssistant, caplog):
     assert "unknown key 'tua'" in caplog.text
 
 
+async def test_debug_attributes(hass: HomeAssistant, clock):
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "debug": True, "max_rate_dt": 1, "deadband": 0.01}])
+    await feed(hass, clock, [(10, 12), (20, 14)])
+    attrs = hass.states.get(OUT).attributes
+    assert attrs["source"] == SRC
+    assert attrs["tau_filter"] == 10
+    assert set(attrs["deadband"]) >= {"deadband", "deadband_filtered_mean", "deadband_filtered_sigma"}
+    assert set(attrs["dt_output"]) == {"dt_output", "dt_output_mean", "dt_output_sigma"}
+
+
+async def test_friendly_name_follows_a_renamed_source(hass: HomeAssistant, clock):
+    """Renaming the source (its friendly name) renames the filtered entity at once, not only
+    after a restart; the source's values alone never cause a write."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 5}])
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(10, 60, 10)])
+    assert writes == []                                    # values under the deadband
+    await feed(hass, clock, [(70, 10.001)], {**ATTRS, "friendly_name": "Kitchen"})
+    assert hass.states.get(OUT).attributes["friendly_name"] == "Kitchen (Filtered)"
+    await feed(hass, clock, [(80, 10.002)], {**ATTRS, "friendly_name": "Kitchen oven"})
+    assert hass.states.get(OUT).attributes["friendly_name"] == "Kitchen oven (Filtered)"
+    n = len(writes)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(90, 140, 10)], {**ATTRS, "friendly_name": "Kitchen oven"})
+    assert len(writes) == n                                # same name: no write
+
+
 # ------------------------------------------------------------------ filtering and publishing
 
 
@@ -158,7 +169,7 @@ async def test_integral_term_publishes_noise_under_the_deadband(hass: HomeAssist
 
 async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
     hass.states.async_set(SRC, "0", ATTRS)
-    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 1, "deadband": 0.01, "max_rate_dt": 10}])
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01, "max_rate_dt": 10}])
     writes = recorded(hass, OUT)
     await feed(hass, clock, [(t, t) for t in range(1, 61)])   # a ramp, one value per second
     assert 4 <= len(writes) <= 7                              # about one write per 10 s
@@ -167,7 +178,7 @@ async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
 # ------------------------------------------------------------------ silence
 
 
-async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, registered, injector_in_loop):
+async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, registered):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01, "max_rate_dt": 1}])
     await feed(hass, clock, [(t, (0 if t < 100 else 50) + jitter(t // 10)) for t in range(0, 110, 10)])
@@ -177,9 +188,9 @@ async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, regis
     assert float(hass.states.get(OUT).state) == pytest.approx(50.0, abs=0.002)  # driven to the last value
 
 
-async def test_injection_runs_in_a_worker_thread(hass: HomeAssistant, clock, registered, monkeypatch):
-    """Timers created with plain methods (no @callback) run in Home Assistant's executor:
-    the filter state is then modified outside the event loop."""
+async def test_injection_runs_in_the_event_loop(hass: HomeAssistant, clock, registered, monkeypatch):
+    """The injector's timer callbacks are @callback: they run in the event loop, never in
+    a worker thread where they would change the filter state while the loop uses it."""
     threads = set()
     orig = TauInjector._inject_once
 
@@ -192,12 +203,11 @@ async def test_injection_runs_in_a_worker_thread(hass: HomeAssistant, clock, reg
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01}])
     await feed(hass, clock, [(t, 10 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 400, step=5)
-    assert threads, "no injection happened"
-    assert False in threads, "every injection ran in the event loop"
+    assert threads == {True}
 
 
 @pytest.mark.parametrize("mode, expected", [("zero", "0.0"), ("unknown", "unknown")])
-async def test_silence_modes(hass: HomeAssistant, clock, registered, injector_in_loop, mode, expected):
+async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expected):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": mode}])
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
@@ -205,7 +215,7 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, injector_in
     assert hass.states.get(OUT).state == expected
 
 
-async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered, injector_in_loop):
+async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
@@ -222,32 +232,84 @@ async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered, inj
     assert len(writes) == 2 and float(writes[1]) > 25
 
 
-async def test_new_entity_loses_silence_detection(hass: HomeAssistant, clock):
-    """BUG. A new entity is registered under an id derived from its name (sensor.src_filtered),
-    then renamed to sensor.lp_src by _deferred_rename. Home Assistant removes and re-adds the
-    entity for the rename: async_will_remove_from_hass stops the injector for good
-    (_stopped stays True), so until the next restart there is no silence detection at all."""
+async def test_new_entity_has_silence_detection(hass: HomeAssistant, clock):
+    """A new entity is registered directly under its final entity_id (no rename, which
+    used to remove and re-add it and stop its injector until the next restart)."""
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
-    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
-    assert ent.injector._stopped is True
+    assert er.async_get(hass).async_get(OUT) is not None
+    assert er.async_get(hass).async_get("sensor.src_filtered") is None
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 900, step=5)
-    assert float(hass.states.get(OUT).state) < 19.5      # never converged to 20
-    assert ent.injector.unsub_silence is None             # no silence timer armed
+    assert float(hass.states.get(OUT).state) == pytest.approx(20.0, abs=0.002)
 
 
-async def test_renaming_entity_id_in_ui_is_undone(hass: HomeAssistant, clock, registered):
-    """A user renaming the filtered entity in the UI gets the old id back at once: the
-    rename re-adds the entity, and async_added_to_hass renames it back. Each of these
-    removals also stops the injector for good."""
+async def test_renaming_entity_id_in_ui_is_kept(hass: HomeAssistant, clock, registered):
+    """A user renaming the filtered entity in the UI keeps the new id, and its silence
+    detection keeps working (the injector starts again when the entity is re-added)."""
     hass.states.async_set(SRC, "0", ATTRS)
-    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30}])
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
     er.async_get(hass).async_update_entity(OUT, new_entity_id="sensor.my_power")
     await hass.async_block_till_done()
-    assert hass.states.get("sensor.my_power") is None
+    assert hass.states.get("sensor.my_power") is not None
+    assert hass.states.get(OUT) is None
+    ent = hass.data["entity_components"]["sensor"].get_entity("sensor.my_power")
+    assert ent.injector._stopped is False
+    for t in range(10, 110, 10):
+        await clock.at(t)
+        hass.states.async_set(SRC, str(20 + jitter(t // 10)), ATTRS)
+        await hass.async_block_till_done()
+    await clock.run_until(111, 900, step=5)
+    assert float(hass.states.get("sensor.my_power").state) == pytest.approx(20.0, abs=0.002)
+
+
+# ------------------------------------------------------------------ adaptive deadband
+
+
+def sigma_time_constant(ent, now):
+    """The time constant of the EMA of σ, as filter.py computes it."""
+    tau_s_min = 10.0 * ent.cfg.tau
+    if ent.core.t_sigma_start is None:
+        return tau_s_min
+    return min(ent.cfg.deadband_tau_sigma, max(tau_s_min, now - ent.core.t_sigma_start))
+
+
+async def test_sigma_time_constant_grows_on_a_new_entity(hass: HomeAssistant, clock, registered):
+    """The EMA of σ starts at 10 tau and grows with time up to deadband_tau_sigma. It stayed
+    at 10 tau on every entity created since March 2026: t_sigma_start was only set when
+    the filter had no value yet, and the sensor gives it one before any sample."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 20, "deadband_tau_sigma": 1000}])
     ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
-    assert ent.injector._stopped is True
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(2, 1200, 2)])
+    assert ent.core.t_sigma_start is not None
+    now = dt_util.utcnow().timestamp()
+    assert sigma_time_constant(ent, now) == 1000
+
+
+async def test_sigma_start_restored_empty_is_set_again(hass: HomeAssistant, clock):
+    """An entity saved with t_sigma_start empty (created since March 2026) gets it at its
+    first sample after the upgrade."""
+    t = dt_util.utcnow().timestamp()
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, "10.0", {"unit_of_measurement": "W", "state_class": "measurement"}),
+                {
+                    "low_pass": {"y": 10.0, "t_prev": t - 5, "x_prev": 10.0, "time_last_pub": t - 5, "err_i": 0.0, "circular": None},
+                    "ema_source": {"src_mean": 10.0, "src_var": 0.0, "t_sigma_start": None},
+                    "ema_dt_source": {"dt_mean": 2.0, "dt_m2": 4.0, "t_last_source": t - 5},
+                    "ema_dt_output": {"dt_output_mean": 10.0, "dt_output_m2": 100.0, "decimals": 2},
+                },
+            )
+        ],
+    )
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 20}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(2, 10.001)])
+    assert ent.core.t_sigma_start is not None
 
 
 # ------------------------------------------------------------------ circular

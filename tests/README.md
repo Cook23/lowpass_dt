@@ -3,10 +3,16 @@
 Run against a real Home Assistant core (pytest-homeassistant-custom-component):
 
 ```
-python3 -m venv venv
+python3.14 -m venv venv
 venv/bin/pip install -r requirements_test.txt
 venv/bin/pytest
 ```
+
+`requirements_test.txt` pins Home Assistant 2026.10, which needs Python 3.14. With Python
+3.13: `pytest-homeassistant-custom-component` 0.13.205 (Home Assistant 2025.1), 0.13.254
+(2025.6), 0.13.289 (2025.10) or 0.13.316 (2026.2), with `pycares<5` for the 2025 versions.
+The CI runs the suite on all five; the two "Recreate entity IDs" tests are skipped on the
+2025 versions, which do not have it.
 
 | File | What it covers |
 |---|---|
@@ -15,10 +21,8 @@ venv/bin/pytest
 | `test_parsing.py` | Source state parsing, output decimals |
 | `test_entity.py` | The entity in Home Assistant: publishing, silence, marker, circular, total_increasing, restore |
 | `test_patterns.py` | `patterns`: startup scan, dynamic creation, cleanup, recursion guard, reload |
+| `test_entity_id.py` | entity_id never derived from the friendly name, on every asynchronous path |
 
 Tests whose docstring starts with **BUG** or says **Known weakness / inconsistency** assert
 the current, wrong behaviour, so that the suite passes today and documents it. Once a fix
 lands, such a test fails: invert it into a test of the fixed behaviour.
-
-The silence tests use the `injector_in_loop` fixture: without it they are flaky, because the
-injector's timer callbacks run in a worker thread (`test_injection_runs_in_a_worker_thread`).

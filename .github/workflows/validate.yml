@@ -1,0 +1,57 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Tests (Home Assistant ${{ matrix.ha }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha: "2025.1"
+            python: "3.13"
+            extra: "pycares<5"
+            plugin: "0.13.205"
+          - ha: "2025.6"
+            python: "3.13"
+            extra: "pycares<5"
+            plugin: "0.13.254"
+          - ha: "2025.10"
+            python: "3.13"
+            extra: "pycares<5"
+            plugin: "0.13.289"
+          - ha: "2026.2"
+            python: "3.13"
+            plugin: "0.13.316"
+          - ha: "2026.10"
+            python: "3.14"
+            plugin: "0.13.371"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # (extra: pycares 5 breaks the aiodns of Home Assistant 2025.x)
+      - run: pip install "pytest-homeassistant-custom-component==${{ matrix.plugin }}" ${{ matrix.extra && format('"{0}"', matrix.extra) || '' }}
+      - run: pytest -q
+
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
