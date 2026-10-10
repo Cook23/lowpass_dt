@@ -190,7 +190,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self._restore_internal_state(data.as_dict())
         else:
             if self.entity_id == f"sensor.{self._object_id}":
-                _LOGGER.warning("context lost or new entity for %r (empty filter state).", self.entity_id)
+                _LOGGER.info("context lost or new entity for %r (empty filter state).", self.entity_id)
 
         # ------------------------------------------------------------
         # Exclude HA down time from stats
@@ -296,7 +296,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         ):
             self.async_write_ha_state()
         else:
-            _LOGGER.warning(
+            _LOGGER.info(
                 "restore failed for %r — no value and no structural attributes (restore=%s, source=%s)",
                 self.entity_id,
                 list(restore_attrs.keys()) if restore_attrs else [],

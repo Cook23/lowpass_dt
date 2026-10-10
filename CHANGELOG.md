@@ -28,6 +28,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - **The first value had one decimal more than the next ones.** With the dynamic rounding (no `round` set), the number of decimals is derived from the deadband, with a hysteresis so that it does not flicker. The first value used a different formula, which gave one decimal more than every following value with the same deadband. Both now agree.
 
+### Changed — fewer warnings in the log
+
+- Normal events are no longer logged as warnings: a new filtered entity, the removal of an orphan, a broad pattern skipping the integration's own entities (debug), a publish held back by `max_rate_dt` (debug), a `total_increasing` value held back (debug) or accepted after a reset. Warnings are kept for configuration errors.
+
 ---
 
 ## v1.3.17

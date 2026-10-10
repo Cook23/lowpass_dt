@@ -195,7 +195,7 @@ async def async_setup_entry_loader(
 
                 # Recursion protection: never filter a lowpass_dt entity
                 if _is_own(eid):
-                    _LOGGER.warning("patterns[]: match=%r includes lowpass sensor %r. Skipped to avoid recursion.", pat, eid)
+                    _LOGGER.debug("patterns[]: match=%r includes lowpass sensor %r. Skipped to avoid recursion.", pat, eid)
                     continue
 
                 # -------- KEEP (existence only) --------
@@ -244,7 +244,7 @@ async def async_setup_entry_loader(
 
             # find the source entity from unique_id
             if entity.unique_id not in keep_unique_ids:
-                _LOGGER.warning("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
+                _LOGGER.info("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
                 reg.async_remove(entity.entity_id)
 
         # ------------------------------------------------------------
@@ -335,7 +335,7 @@ async def async_setup_entry_loader(
                 return
 
             if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
-                _LOGGER.error("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
+                _LOGGER.warning("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
                 return
 
             desired_unique_ids.add(meta.unique_id)

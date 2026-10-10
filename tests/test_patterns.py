@@ -174,3 +174,24 @@ async def test_guard_holds_whatever_entity_id_home_assistant_picks(hass: HomeAss
         hass.states.async_set(eid, str(11 + t), {**ATTRS, "friendly_name": "Power A"})
         await hass.async_block_till_done()
     assert lowpass_ids(hass) == ["sensor.power_a_filtered"]
+
+
+async def test_normal_operation_logs_no_warning(hass: HomeAssistant, caplog):
+    """New entities, a broad pattern, restarts and publishing: nothing at WARNING level."""
+    import logging
+
+    caplog.set_level(logging.INFO)
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": "sensor.src"}], patterns=[{"match": "sensor.*"}])
+    await start(hass)
+    for t in range(5):
+        hass.states.async_set(eid, str(11 + t), ATTRS)
+        hass.states.async_set("sensor.src", str(11 + t), ATTRS)
+        await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries("lowpass_dt")[0]
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    warnings = [r.getMessage() for r in caplog.records if r.name.startswith("custom_components.lowpass_dt") and r.levelno >= logging.WARNING]
+    assert warnings == []

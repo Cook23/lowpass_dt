@@ -120,7 +120,7 @@ class Publisher:
                     if self.cfg.deadband is None and self.core.t_sigma_start is not None:
                         elapsed = now - self.core.t_sigma_start
                         if elapsed >= self.cfg.deadband_tau_sigma:
-                            _LOGGER.warning(
+                            _LOGGER.debug(
                                 "Publish blocked by max_rate_dt=%.1fs for %r (deadband=%.6f, err=%.6f, err_i=%.6f)",
                                 self.cfg.max_rate_dt,
                                 self.cfg.source,
@@ -303,7 +303,7 @@ class Publisher:
         if (s._attr_state_class == "total_increasing" and prev is not None and reported < prev):
             if self.sensor._reset_pending:
 
-                _LOGGER.warning(
+                _LOGGER.info(
                     "total_increasing monotonicity break ACCEPTED after reset for %s: %.6f → %.6f",
                     s.entity_id,
                     prev,
@@ -312,7 +312,7 @@ class Publisher:
                 self.sensor._reset_pending = False
 
             else:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "total_increasing monotonicity break BLOCKED for %s: %.6f → %.6f",
                     s.entity_id,
                     prev,
