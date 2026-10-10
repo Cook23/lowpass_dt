@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       # (extra: pycares 5 breaks the aiodns of Home Assistant 2025.x)
-      - run: pip install "pytest-homeassistant-custom-component==${{ matrix.plugin }}" ${{ matrix.extra }}
+      - run: pip install "pytest-homeassistant-custom-component==${{ matrix.plugin }}" ${{ matrix.extra && format('"{0}"', matrix.extra) || '' }}
       - run: pytest -q
 
   hassfest:
