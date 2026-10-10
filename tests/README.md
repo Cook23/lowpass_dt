@@ -9,8 +9,10 @@ venv/bin/pytest
 ```
 
 `requirements_test.txt` pins Home Assistant 2026.10, which needs Python 3.14. With Python
-3.13, `pytest-homeassistant-custom-component==0.13.316` gives Home Assistant 2026.2. The
-suite is run on both.
+3.13: `pytest-homeassistant-custom-component` 0.13.205 (Home Assistant 2025.1), 0.13.254
+(2025.6), 0.13.289 (2025.10) or 0.13.316 (2026.2), with `pycares<5` for the 2025 versions.
+The CI runs the suite on all five; the two "Recreate entity IDs" tests are skipped on the
+2025 versions, which do not have it.
 
 | File | What it covers |
 |---|---|

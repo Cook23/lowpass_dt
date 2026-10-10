@@ -207,7 +207,7 @@ async def simulate(hass, freezer, samples, options, t_end):
     for ts, x in samples[1:] + [(t_end, None)]:
         while ts - t > 1.0:            # a gap: let the timers run, second by second
             t += 1.0
-            await at(t)
+            await at(t - 0.5)          # (between whole seconds, where the timers fall)
         t = ts
         if x is None:
             await at(t)

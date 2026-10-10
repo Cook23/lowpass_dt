@@ -175,6 +175,10 @@ The deadband threshold is estimated from the signal's own variability over time,
 
 ## 📦 Install
 
+### Home Assistant versions
+
+The 1.4 line is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older ones are not tested.
+
 ### HACS (recommended)
 
 Add this repository as a **custom repository** in HACS: `https://github.com/Cook23/lowpass_dt`
