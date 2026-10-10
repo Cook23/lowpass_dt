@@ -22,8 +22,6 @@ A change that would break this is redesigned, not merged.
 From the October 2026 review (details in the review's tests, `tests/`):
 - `alpha = 1 − exp(−dt/tau)`: the filter no longer depends on the sampling rate
   (behavior change, to announce);
-- patterns: sources without `unique_id` kept across restarts, scan and cleanup after a
-  reload, only numeric sources;
 - `Publisher.publish` split; a real integral term, or none;
 - configuration validated by a voluptuous `CONFIG_SCHEMA`;
 - CI: hassfest, HACS validation, pytest.

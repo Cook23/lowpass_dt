@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import logging
+import re
 
 from dataclasses import dataclass
 
@@ -38,6 +39,29 @@ def _float_or_default(value, default):
         return float(value)
     except Exception:
         return default
+
+
+# ------------------------------------------------------------
+# Source state parsing: a number, optionally followed by a unit
+# ------------------------------------------------------------
+# The unit must not start with a digit or a separator: a date ("2026-10-10"), a time
+# ("10:30"), a version ("1.2.3") or a decimal comma ("12,5") is not a measurement.
+_NUMBER_UNIT = re.compile(r"^\s*([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([^\d\s.,:;/+\-]\S*)?\s*$")
+
+
+def parse_state(state_str) -> tuple[float | None, str | None]:
+    """Numeric value and optional unit of a source state, or (None, None)."""
+    try:
+        value = float(state_str)
+        return (value, None) if math.isfinite(value) else (None, None)
+    except (TypeError, ValueError):
+        pass
+    m = _NUMBER_UNIT.match(state_str) if isinstance(state_str, str) else None
+    if m:
+        value = float(m.group(1))
+        if math.isfinite(value):
+            return value, m.group(2)
+    return None, None
 
 
 @dataclass

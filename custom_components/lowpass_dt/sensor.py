@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
-import re
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -18,6 +16,7 @@ from .config import (
     LowpassCfg,
     CfgMeta,
     make_meta,
+    parse_state,
 )
 
 from .filter import LowpassCore
@@ -164,14 +163,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # ------------------------------------------------------------
     def _parse_source_value(self, state_str):
         """Extract numeric value and optional unit from source state string."""
-        try:
-            value = float(state_str)
-            return (value, None) if math.isfinite(value) else (None, None)
-        except Exception:
-            m = re.match(r'^\s*([+-]?\d+\.?\d*)\s*(\S+)?\s*$', state_str)
-            if m:
-                return float(m.group(1)), m.group(2)
-        return None, None
+        return parse_state(state_str)
 
 
     # ------------------------------------------------------------
