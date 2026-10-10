@@ -42,16 +42,9 @@ async def test_dynamic_creation_when_a_source_appears(hass: HomeAssistant):
     assert hass.states.get("sensor.lp_power_new") is not None
 
 
-async def test_broad_pattern_filters_its_own_new_entities(hass: HomeAssistant, monkeypatch):
-    """BUG. A new filtered entity is first registered under an id derived from its name
-    (sensor.power_a_filtered), which the recursion guard does not know (it only knows the
-    final sensor.lp_power_a). A pattern such as sensor.* then filters it again, and the
-    filtered copy again, and so on: lp_lp_lp_…, until the limit of 100 entities, or a
-    RecursionError in the name updates (each level rewrites the next one synchronously).
-    The limit is lowered to 3 here to keep the test quick and clean."""
-    import custom_components.lowpass_dt.loader as loader
-
-    monkeypatch.setattr(loader, "MAX_PATTERN_ENTITIES", 3)
+async def test_broad_pattern_does_not_filter_its_own_entities(hass: HomeAssistant):
+    """A pattern such as sensor.* must not filter the filtered entities (it used to, in a
+    chain lp_lp_lp_…, while a new entity was first registered under another id)."""
     eid = register_source(hass, "power_a")
     hass.states.async_set(eid, "10", ATTRS)
     await setup_lowpass(hass, patterns=[{"match": "sensor.*"}])
@@ -59,9 +52,21 @@ async def test_broad_pattern_filters_its_own_new_entities(hass: HomeAssistant, m
     for t in range(5):
         hass.states.async_set(eid, str(11 + t), ATTRS)
         await hass.async_block_till_done()
-    ids = lowpass_ids(hass)
-    assert "sensor.lp_power_a" in ids
-    assert any(i.startswith("sensor.lp_lp_") for i in ids), ids
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+
+
+async def test_broad_pattern_skips_a_renamed_filtered_entity(hass: HomeAssistant):
+    """The guard also knows a filtered entity the user renamed (by the registry)."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.*"}])
+    await start(hass)
+    er.async_get(hass).async_update_entity("sensor.lp_power_a", new_entity_id="sensor.power_smooth")
+    await hass.async_block_till_done()
+    for t in range(3):
+        hass.states.async_set(eid, str(20 + t), ATTRS)
+        await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.power_smooth"]
 
 
 async def test_broad_pattern_is_safe_once_entities_are_registered(hass: HomeAssistant):
@@ -136,3 +141,27 @@ async def test_reload_after_start_skips_the_startup_scan(hass: HomeAssistant):
     hass.states.async_set(eid, "11", ATTRS)
     await hass.async_block_till_done()
     assert hass.states.get("sensor.lp_power_a").state not in ("unavailable", None)
+
+
+async def test_guard_holds_whatever_entity_id_home_assistant_picks(hass: HomeAssistant, monkeypatch):
+    """Even if Home Assistant ignored the entity_id the integration sets, and derived it from
+    the friendly name instead (sensor.power_a_filtered, without the lp_ prefix), a broad
+    pattern must not filter the filtered entity: the guard knows it by the entity registry
+    (platform lowpass_dt), not by its entity_id."""
+    from custom_components.lowpass_dt.sensor import LowpassDtSensor
+
+    orig_init = LowpassDtSensor.__init__
+
+    def init_without_entity_id(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        self.entity_id = None
+
+    monkeypatch.setattr(LowpassDtSensor, "__init__", init_without_entity_id)
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", {**ATTRS, "friendly_name": "Power A"})
+    await setup_lowpass(hass, patterns=[{"match": "sensor.*"}])
+    await start(hass)
+    for t in range(5):
+        hass.states.async_set(eid, str(11 + t), {**ATTRS, "friendly_name": "Power A"})
+        await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.power_a_filtered"]

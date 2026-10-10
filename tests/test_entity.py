@@ -158,7 +158,7 @@ async def test_integral_term_publishes_noise_under_the_deadband(hass: HomeAssist
 
 async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
     hass.states.async_set(SRC, "0", ATTRS)
-    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 1, "deadband": 0.01, "max_rate_dt": 10}])
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01, "max_rate_dt": 10}])
     writes = recorded(hass, OUT)
     await feed(hass, clock, [(t, t) for t in range(1, 61)])   # a ramp, one value per second
     assert 4 <= len(writes) <= 7                              # about one write per 10 s
@@ -222,32 +222,35 @@ async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered, inj
     assert len(writes) == 2 and float(writes[1]) > 25
 
 
-async def test_new_entity_loses_silence_detection(hass: HomeAssistant, clock):
-    """BUG. A new entity is registered under an id derived from its name (sensor.src_filtered),
-    then renamed to sensor.lp_src by _deferred_rename. Home Assistant removes and re-adds the
-    entity for the rename: async_will_remove_from_hass stops the injector for good
-    (_stopped stays True), so until the next restart there is no silence detection at all."""
+async def test_new_entity_has_silence_detection(hass: HomeAssistant, clock, injector_in_loop):
+    """A new entity is registered directly under its final entity_id (no rename, which
+    used to remove and re-add it and stop its injector until the next restart)."""
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
-    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
-    assert ent.injector._stopped is True
+    assert er.async_get(hass).async_get(OUT) is not None
+    assert er.async_get(hass).async_get("sensor.src_filtered") is None
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 900, step=5)
-    assert float(hass.states.get(OUT).state) < 19.5      # never converged to 20
-    assert ent.injector.unsub_silence is None             # no silence timer armed
+    assert float(hass.states.get(OUT).state) == pytest.approx(20.0, abs=0.002)
 
 
-async def test_renaming_entity_id_in_ui_is_undone(hass: HomeAssistant, clock, registered):
-    """A user renaming the filtered entity in the UI gets the old id back at once: the
-    rename re-adds the entity, and async_added_to_hass renames it back. Each of these
-    removals also stops the injector for good."""
+async def test_renaming_entity_id_in_ui_is_kept(hass: HomeAssistant, clock, registered, injector_in_loop):
+    """A user renaming the filtered entity in the UI keeps the new id, and its silence
+    detection keeps working (the injector starts again when the entity is re-added)."""
     hass.states.async_set(SRC, "0", ATTRS)
-    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30}])
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
     er.async_get(hass).async_update_entity(OUT, new_entity_id="sensor.my_power")
     await hass.async_block_till_done()
-    assert hass.states.get("sensor.my_power") is None
-    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
-    assert ent.injector._stopped is True
+    assert hass.states.get("sensor.my_power") is not None
+    assert hass.states.get(OUT) is None
+    ent = hass.data["entity_components"]["sensor"].get_entity("sensor.my_power")
+    assert ent.injector._stopped is False
+    for t in range(10, 110, 10):
+        await clock.at(t)
+        hass.states.async_set(SRC, str(20 + jitter(t // 10)), ATTRS)
+        await hass.async_block_till_done()
+    await clock.run_until(111, 900, step=5)
+    assert float(hass.states.get("sensor.my_power").state) == pytest.approx(20.0, abs=0.002)
 
 
 # ------------------------------------------------------------------ adaptive deadband

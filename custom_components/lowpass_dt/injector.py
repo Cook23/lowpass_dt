@@ -40,6 +40,12 @@ class TauInjector:
         self._stopped = False
 
     # ------------------------------------------------------------
+    # Start (again, after stop: the entity can be removed and added again)
+    # ------------------------------------------------------------
+    def start(self):
+        self._stopped = False
+
+    # ------------------------------------------------------------
     # Public cleanup
     # ------------------------------------------------------------
     def stop(self):

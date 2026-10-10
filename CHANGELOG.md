@@ -8,6 +8,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ## v1.3.18
 
+### Fixed — a new filtered entity could not be created on recent Home Assistant versions
+
+- **"Error adding entity" on a new filtered entity.** A new filtered entity was first registered under an id taken from its name (`sensor.temperature_filtered`), then renamed to its real id (`sensor.lp_temperature`). On recent Home Assistant versions the rename came while the entity was still being added, and the creation failed; on older ones, the rename removed and re-added the entity, which stopped its silence detection until the next restart. The entity is now registered directly under its real id. Existing entities keep theirs. An entity_id renamed in Home Assistant is kept, instead of being set back, and a broad pattern such as `sensor.*` no longer filters the filtered entities themselves.
+
 ### Fixed — `deadband_tau_sigma` had no effect on entities created since March 2026
 
 - **The time constant of the σ estimate stayed at its minimum.** The adaptive deadband estimates σ with an EMA whose time constant starts at 10 × `tau` and grows with time up to `deadband_tau_sigma`. Its starting time was only recorded when the filter had no value yet — but since March 2026 the filter gets its value (last state, or the source's) before any sample. On every entity created since, the time constant stayed at 10 × `tau`, and `deadband_tau_sigma` changed nothing; the "Publish blocked by max_rate_dt" message never appeared. Entities created before kept their starting time across restarts and were not affected. The starting time is now recorded at the first sample, including on entities saved without it.
