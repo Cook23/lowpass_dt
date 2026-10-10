@@ -19,7 +19,10 @@ suite is run on both.
 | `test_parsing.py` | Source state parsing, output decimals |
 | `test_entity.py` | The entity in Home Assistant: publishing, silence, marker, circular, total_increasing, restore |
 | `test_patterns.py` | `patterns`: startup scan, dynamic creation, cleanup, recursion guard, reload |
+| `test_entity_id.py` | entity_id never derived from the friendly name, on every asynchronous path |
+| `test_behavior.py` | the filter as a whole: first order whatever the sampling, few writes, a natural curve redrawn from the stored points (`-s` prints the measures) |
 
-Tests whose docstring starts with **BUG** or says **Known weakness / inconsistency** assert
+Tests marked `xfail(strict=True)` state a goal the code does not reach yet, with the reason: when
+it is reached, they fail as XPASS, and the marker is removed. Tests whose docstring starts with **BUG** or says **Known weakness / inconsistency** assert
 the current, wrong behaviour, so that the suite passes today and documents it. Once a fix
 lands, such a test fails: invert it into a test of the fixed behaviour.

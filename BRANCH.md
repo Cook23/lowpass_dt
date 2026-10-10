@@ -22,6 +22,9 @@ A change that would break this is redesigned, not merged.
 From the October 2026 review (details in the review's tests, `tests/`):
 - `alpha = 1 − exp(−dt/tau)`: the filter no longer depends on the sampling rate
   (behavior change, to announce);
-- `Publisher.publish` split; a real integral term, or none;
+- a real integral term, or none;
+- proposal: while the output moves (after a new value, during a silence), publish points
+  paced by the deadband along its known exponential, so that straight lines between them
+  redraw it (`test_slow_source_step_is_redrawn_by_straight_lines`);
 - configuration validated by a voluptuous `CONFIG_SCHEMA`;
 - CI: hassfest, HACS validation, pytest.
