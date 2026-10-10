@@ -139,10 +139,12 @@ async def test_fixed_deadband_suppresses_small_changes(hass: HomeAssistant, cloc
 
 
 async def test_integral_term_publishes_noise_under_the_deadband(hass: HomeAssistant, clock):
-    """err_i = err × (time since the last write) / tau is not an integral: it uses only the
-    current error, so pure noise (errors of alternating sign, which a real integral would
-    cancel) still crosses the deadband once enough time has passed. Here, noise ten times
-    under the deadband is written about every 8 s with tau = 1."""
+    """err_i = err × (time since the last write) / tau: the current error held over the whole
+    time since the last write, not an accumulated integral. Far outside the normal regime
+    (tau = 1 s, a value every second), noise ten times under the deadband is then written
+    about every 8 s. In the normal regime (tau ~ 10 source periods) the difference with an
+    accumulated integral is a few % of writes and accuracy (measured with
+    test_behavior.py's scenarios), so the term is kept as is."""
     hass.states.async_set(SRC, "20", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 1, "deadband": 1.0, "max_rate_dt": 0.5}])
     writes = recorded(hass, OUT)
