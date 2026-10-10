@@ -261,9 +261,6 @@ def report(name, samples, stored, tau, t_end, step=5.0):
 
 # ------------------------------------------------------------------ scenarios
 
-ALPHA = pytest.mark.xfail(strict=True, reason="alpha = dt / (tau + dt) is not the exact first order: alpha = 1 - exp(-dt / tau) planned (BRANCH.md)")
-
-
 def wave_samples(rng, t_end, period, burst=0.25, slow=0.0, silence=0.0, amplitude=5.0, noise=0.2):
     """A slow wave with noise, reported around `period` (log-normal), with bursts (0.2 to
     1 s), slow stretches (2 to 10 periods) and silences (20 to 60 min)."""
@@ -340,7 +337,6 @@ async def test_normal_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, fr
     assert sound(samples, stored)
 
 
-@ALPHA
 async def test_normal_silence_resume_redrawn_by_tension_spline(hass: HomeAssistant, freezer):
     """The same, drawn by Chart.js 'tension: 0.4': where the output starts rising again, the
     spline rounds the corner; it stays within 1 (5 % of the step) once the rise is the
@@ -456,7 +452,6 @@ async def test_slowed_source_step_stays_sound(hass: HomeAssistant, freezer):
     assert abs(stored[-1][1] - 100.0) < 0.5
 
 
-@ALPHA
 async def test_slowed_source_step_is_first_order(hass: HomeAssistant, freezer):
     """The same step: once the new value is known, the written values follow
     1 − exp(−t/tau), not a slower curve."""

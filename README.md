@@ -106,11 +106,11 @@ Handles irregular update intervals correctly:
 
 ```
 dt[n]    = t[n] - t[n-1]
-alpha[n] = dt[n] / (tau + dt[n])
+alpha[n] = 1 - exp(-dt[n] / tau)
 y[n]     = y[n-1] + alpha[n] * (x[n-1] - y[n-1])
 ```
 
-The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical.
+The filter time constant `tau` is always expressed in real seconds, regardless of how often the source updates. A sensor publishing every 5 seconds and one publishing every 5 minutes will both be filtered with the same physical time constant if `tau` is identical. With `alpha = 1 - exp(-dt / tau)` — the exact solution of a first-order low-pass whose input is held over `dt` — the result does not depend on how the time is split: one step of 5 minutes or sixty steps of 5 seconds give the same output.
 
 The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the time that has just elapsed — is applied to `x[n-1]`, the value that was actually in effect during that interval, not to the newly arrived `x[n]`. The new sample only becomes "the value in effect" for the *next* interval. This matters for sparse or impulsive signals: a short-lived spike arriving after a long silence is not mistakenly weighted as if it had lasted the whole preceding interval. The trade-off is a one-sample delay, which is negligible for continuous, regularly-sampled signals and only becomes visible on sparse, spiky sources — exactly the case it was designed to fix.
 

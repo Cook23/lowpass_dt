@@ -1,4 +1,5 @@
 """The filtered entity inside a real Home Assistant core, with a controlled clock."""
+import math
 import threading
 from datetime import timedelta
 
@@ -364,4 +365,4 @@ async def test_restore_keeps_full_precision_filter_state(hass: HomeAssistant, cl
     assert ent.injector.dt_mean == 10.0
     assert hass.states.get(OUT).state == "12.3"
     # downtime (5 s) weighted on the value before shutdown (12.0), not the startup value
-    assert ent.core.y == pytest.approx(12.3456789 + (5 / 65) * (12.0 - 12.3456789), abs=1e-3)
+    assert ent.core.y == pytest.approx(12.3456789 + (1 - math.exp(-5 / 60)) * (12.0 - 12.3456789), abs=1e-6)

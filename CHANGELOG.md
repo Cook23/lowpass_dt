@@ -8,6 +8,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ## v1.4.0 (beta) — unreleased
 
+### Changed — the exact first-order low-pass
+
+- **`alpha = 1 − exp(−dt / tau)`** instead of `dt / (tau + dt)`. The former is the exact solution of a first-order low-pass whose input is held over `dt` (zero-order hold); the latter was only close to it for `dt` small compared to `tau`. The output no longer depends on how often it is computed: one step of 5 minutes or sixty steps of 5 seconds give the same value, whatever the source's rhythm and the injections during a silence. In the normal regime (`tau` about 10 times the source's period) the change is barely visible; it matters when a source slows down beyond `tau` — a step on a source reporting every 10 minutes with `tau` = 2 minutes used to reach 83 % of the new value where the first order reaches 99 % — and for the curve right after a silence.
+
 ### Fixed — a new filtered entity had no silence detection until the next restart
 
 - **No silence detection on a new entity.** A new filtered entity was first registered under an id taken from its name (`sensor.temperature_filtered`), then renamed to its real id (`sensor.lp_temperature`). Home Assistant removes and re-adds an entity to rename it, and the removal stopped the silence detection for good: until the next restart, a silent source left the filtered value where it was. The entity is now registered directly under its real id.

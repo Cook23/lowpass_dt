@@ -4,6 +4,15 @@ import math
 _LOGGER = logging.getLogger(__name__)
 
 
+def _alpha(dt, tau):
+    """Weight of the value in effect over dt (zero-order hold): the exact first order,
+    1 - exp(-dt/tau). Splitting an interval in several steps gives the same result, so
+    the output does not depend on how often it is computed."""
+    if tau <= 0:
+        return 1.0
+    return 1.0 - math.exp(-dt / tau)
+
+
 class LowpassCore:
     """Pure math core: low-pass, adaptive sigma, deadband, rounding."""
 
@@ -56,7 +65,7 @@ class LowpassCore:
         tau = max(0.0, float(self.cfg.tau))
         t_prev = self.t_prev if self.t_prev is not None else now
         dt = max(0.0, now - t_prev)
-        alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
+        alpha = _alpha(dt, tau)
         x_prev = self.x_prev if self.x_prev is not None else self.y
 
         # Zero-order hold (ZOH): dt[n] is the duration during which x_prev
@@ -124,7 +133,7 @@ class LowpassCore:
         tau = max(0.0, float(self.cfg.tau))
         t_prev = self.t_prev if self.t_prev is not None else now
         dt = max(0.0, now - t_prev)
-        alpha = (dt / (tau + dt)) if (tau + dt) > 0 else 1.0
+        alpha = _alpha(dt, tau)
 
         if self.cfg.circular is None:
             self.y = self.y + alpha * (last_source_value - self.y)
