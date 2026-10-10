@@ -6,15 +6,7 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ---
 
-## v1.4.0 (beta) — unreleased
-
-### Changed — no more delay of one sample on slow sources
-
-- **The output follows its course between samples.** With the zero-order hold, a new value is in effect from the moment it arrives, but the filter used to be computed only at the next sample (or once a silence was detected): on a slow source, the output stayed where it was for a whole period before moving — about 10 minutes on a weather sensor updated every 10 minutes. The output is now computed along its known course between samples (every `max_rate_dt`, or `tau` / 100 if longer) and published whenever it moves by the deadband, as usual. On sources reporting faster than that, nothing changes; on slow sources, the curve starts moving at once and gets a few more points along its way (in the tests: a weather sensor written 46 times instead of 24 over 8 hours, three times closer to the first-order curve).
-
-### Changed — the exact first-order low-pass
-
-- **`alpha = 1 − exp(−dt / tau)`** instead of `dt / (tau + dt)`. The former is the exact solution of a first-order low-pass whose input is held over `dt` (zero-order hold); the latter was only close to it for `dt` small compared to `tau`. The output no longer depends on how often it is computed: one step of 5 minutes or sixty steps of 5 seconds give the same value, whatever the source's rhythm and the injections during a silence. In the normal regime (`tau` about 10 times the source's period) the change is barely visible; it matters when a source slows down beyond `tau` — a step on a source reporting every 10 minutes with `tau` = 2 minutes used to reach 83 % of the new value where the first order reaches 99 % — and for the curve right after a silence.
+## v1.4.0 (beta)
 
 ### Fixed — a new filtered entity had no silence detection until the next restart
 
@@ -26,23 +18,31 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - **Filter state changed from a worker thread.** The timers that detect a silence and inject the last value ran in a worker thread of Home Assistant, which changed the filter state while the event loop used it: the result of a silence could depend on how the two interleaved (seen in the tests: the same silence ended differently from one run to the next). Python 3.14, on which Home Assistant now runs, also reports it as an error in debug mode. They now run in the event loop.
 
+### Fixed — `deadband_tau_sigma` had no effect on entities created since March 2026
+
+- **The time constant of the σ estimate stayed at its minimum.** The adaptive deadband estimates σ with an EMA whose time constant starts at 10 × `tau` and grows with time up to `deadband_tau_sigma`. Its starting time was only recorded when the filter had no value yet — but since March 2026 the filter gets its value (last state, or the source's) before any sample. On every entity created since, the time constant stayed at 10 × `tau`, and `deadband_tau_sigma` changed nothing; the "Publish blocked by max_rate_dt" message never appeared. Entities created before kept their starting time across restarts and were not affected. The starting time is now recorded at the first sample, including on entities saved without it.
+
 ### Fixed — patterns
 
 - **A source without `unique_id` lost its filtered entity at each start.** A sensor that is not in the entity registry (a YAML sensor without `unique_id`) was filtered as soon as it changed, but the startup scan only looked at the registry: its filtered entity was then removed as an orphan at each start — with the name, icon or area set in the UI — and created again at the next change. The startup scan now also looks at the sensors that have a state.
 - **Nothing was scanned after a reload.** Patterns were scanned, and orphans cleaned up, only when Home Assistant finished starting: after a reload of the integration, a matching source got its filtered entity back only at its next change. The scan now runs at once when Home Assistant is already running.
 - **Dates and text sensors were filtered as numbers.** A pattern also matched sensors whose state is not a measurement, and `2026-10-10` was read as 2026 with `-10-10` as its unit. A state is now a number, optionally followed by a unit that does not start with a digit or a separator: dates, times, version numbers and decimal commas are not measurements. Patterns only create filtered entities for numeric sources.
 
+### Fixed — the name of the filtered entity follows a renamed source
+
+- **A source renamed in Home Assistant kept its old name on the filtered entity until the next restart.** The friendly name was taken from the source once, at its first change. It now follows every rename of the source, and the state is written only when the name changes — never at each value of the source.
+
 ### Fixed — decimals
 
 - **The first value had one decimal more than the next ones.** With the dynamic rounding (no `round` set), the number of decimals is derived from the deadband, with a hysteresis so that it does not flicker. The first value used a different formula, which gave one decimal more than every following value with the same deadband. Both now agree.
 
-### Fixed — `deadband_tau_sigma` had no effect on entities created since March 2026
+### Changed — the exact first-order low-pass
 
-- **The time constant of the σ estimate stayed at its minimum.** The adaptive deadband estimates σ with an EMA whose time constant starts at 10 × `tau` and grows with time up to `deadband_tau_sigma`. Its starting time was only recorded when the filter had no value yet — but since March 2026 the filter gets its value (last state, or the source's) before any sample. On every entity created since, the time constant stayed at 10 × `tau`, and `deadband_tau_sigma` changed nothing; the "Publish blocked by max_rate_dt" message never appeared. Entities created before kept their starting time across restarts and were not affected. The starting time is now recorded at the first sample, including on entities saved without it.
+- **`alpha = 1 − exp(−dt / tau)`** instead of `dt / (tau + dt)`. The former is the exact solution of a first-order low-pass whose input is held over `dt` (zero-order hold); the latter was only close to it for `dt` small compared to `tau`. The output no longer depends on how often it is computed: one step of 5 minutes or sixty steps of 5 seconds give the same value, whatever the source's rhythm and the injections during a silence. In the normal regime (`tau` about 10 times the source's period) the change is barely visible; it matters when a source slows down beyond `tau` — a step on a source reporting every 10 minutes with `tau` = 2 minutes used to reach 83 % of the new value where the first order reaches 99 % — and for the curve right after a silence.
 
-### Fixed — the name of the filtered entity follows a renamed source
+### Changed — no more delay of one sample on slow sources
 
-- **A source renamed in Home Assistant kept its old name on the filtered entity until the next restart.** The friendly name was taken from the source once, at its first change. It now follows every rename of the source, and the state is written only when the name changes — never at each value of the source.
+- **The output follows its course between samples.** With the zero-order hold, a new value is in effect from the moment it arrives, but the filter used to be computed only at the next sample (or once a silence was detected): on a slow source, the output stayed where it was for a whole period before moving — about 10 minutes on a weather sensor updated every 10 minutes. The output is now computed along its known course between samples (every `max_rate_dt`, or `tau` / 100 if longer) and published whenever it moves by the deadband, as usual. On sources reporting faster than that, nothing changes; on slow sources, the curve starts moving at once and gets a few more points along its way (in the tests: a weather sensor written 46 times instead of 24 over 8 hours, three times closer to the first-order curve).
 
 ### Changed — fewer warnings in the log
 
