@@ -16,6 +16,24 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - **The time constant of the σ estimate stayed at its minimum.** The adaptive deadband estimates σ with an EMA whose time constant starts at 10 × `tau` and grows with time up to `deadband_tau_sigma`. Its starting time was only recorded when the filter had no value yet — but since March 2026 the filter gets its value (last state, or the source's) before any sample. On every entity created since, the time constant stayed at 10 × `tau`, and `deadband_tau_sigma` changed nothing; the "Publish blocked by max_rate_dt" message never appeared. Entities created before kept their starting time across restarts and were not affected. The starting time is now recorded at the first sample, including on entities saved without it.
 
+### Fixed — the silence injection ran outside Home Assistant's event loop
+
+- **Filter state changed from a worker thread.** The timers that detect a silence and inject the last value ran in a worker thread of Home Assistant, which changed the filter state while the event loop used it: the result of a silence could depend on how the two interleaved (seen in the tests: the same silence ended differently from one run to the next). Python 3.14, on which Home Assistant now runs, also reports it as an error in debug mode. They now run in the event loop.
+
+### Fixed — patterns
+
+- **A source without `unique_id` lost its filtered entity at each start.** A sensor that is not in the entity registry (a YAML sensor without `unique_id`) was filtered as soon as it changed, but the startup scan only looked at the registry: its filtered entity was then removed as an orphan at each start — with the name, icon or area set in the UI — and created again at the next change. The startup scan now also looks at the sensors that have a state.
+- **Nothing was scanned after a reload.** Patterns were scanned, and orphans cleaned up, only when Home Assistant finished starting: after a reload of the integration, a matching source got its filtered entity back only at its next change. The scan now runs at once when Home Assistant is already running.
+- **Dates and text sensors were filtered as numbers.** A pattern also matched sensors whose state is not a measurement, and `2026-10-10` was read as 2026 with `-10-10` as its unit. A state is now a number, optionally followed by a unit that does not start with a digit or a separator: dates, times, version numbers and decimal commas are not measurements. Patterns only create filtered entities for numeric sources.
+
+### Fixed — the name of the filtered entity follows a renamed source
+
+- **A source renamed in Home Assistant kept its old name on the filtered entity until the next restart.** The friendly name was taken from the source once, at its first change. It now follows every rename of the source, and the state is written only when the name changes — never at each value of the source.
+
+### Fixed — decimals
+
+- **The first value had one decimal more than the next ones.** With the dynamic rounding (no `round` set), the number of decimals is derived from the deadband, with a hysteresis so that it does not flicker. The first value used a different formula, which gave one decimal more than every following value with the same deadband. Both now agree.
+
 ---
 
 ## v1.3.17
