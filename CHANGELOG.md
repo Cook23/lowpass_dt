@@ -2,7 +2,7 @@
 
 All notable user-facing changes to this integration are documented here.
 
-This changelog starts at **v1.3.14** — earlier versions were not tracked.
+This changelog starts at **v1.3.14** — earlier versions were not tracked, except for one change of v1.3.10 documented afterwards.
 
 ---
 
@@ -112,3 +112,11 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - `should_publish()` now compares against the sensor's actual published state (`sensor._attr_native_value`) instead of a separate internal copy (`core.last_published`), removing a possible desync between what the filter believes was last published and what Home Assistant actually shows. `core.last_published`, along with the now-unused `finalize_publish()` / `export_state()` / `import_state()` helpers built around it, has been removed; `core.time_last_pub` is set directly.
 - `should_publish()` accepts a new `marker` parameter, allowing a check to be performed without triggering a real publish — used internally to decide when the end-of-silence marker should fire.
+
+## v1.3.10
+
+*(documented afterwards)*
+
+### Changed — a margin of 0.1 s in the silence detection
+
+- The silence threshold became `mean + 3σ + 0.1 s` (it was `mean + 3σ`) — the mean and σ being those of the intervals between the source's values. On a very regular source, σ is close to 0, and it is exactly 0 at first (the statistics start from the first interval alone): the threshold was then the usual interval itself, and a value arriving a few milliseconds late — Home Assistant's own latency — was taken for a silence, at almost every value. The margin absorbs that jitter. Below 1 s, the threshold's floor of 1 s already does. It does not cover a skipped value (an interval twice the usual one), which is a silence by this rule.
