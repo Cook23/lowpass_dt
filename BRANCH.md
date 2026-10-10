@@ -25,6 +25,8 @@ From the October 2026 review (details in the review's tests, `tests/`):
 - a real integral term, or none;
 - proposal: while the output moves (after a new value, during a silence), publish points
   paced by the deadband along its known exponential, so that straight lines between them
-  redraw it (`test_slow_source_step_is_redrawn_by_straight_lines`);
+  redraw it (`test_slow_source_step_is_redrawn_by_straight_lines`); and denser points
+  right after a corner (the output starting to move again), which a 'tension' spline
+  otherwise rounds (`test_silence_resume_redrawn_by_tension_spline`);
 - configuration validated by a voluptuous `CONFIG_SCHEMA`;
 - CI: hassfest, HACS validation, pytest.
