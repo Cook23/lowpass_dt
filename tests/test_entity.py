@@ -120,6 +120,23 @@ async def test_debug_attributes(hass: HomeAssistant, clock):
     assert set(attrs["dt_output"]) == {"dt_output", "dt_output_mean", "dt_output_sigma"}
 
 
+async def test_friendly_name_follows_a_renamed_source(hass: HomeAssistant, clock):
+    """Renaming the source (its friendly name) renames the filtered entity at once, not only
+    after a restart; the source's values alone never cause a write."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 5}])
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(10, 60, 10)])
+    assert writes == []                                    # values under the deadband
+    await feed(hass, clock, [(70, 10.001)], {**ATTRS, "friendly_name": "Kitchen"})
+    assert hass.states.get(OUT).attributes["friendly_name"] == "Kitchen (Filtered)"
+    await feed(hass, clock, [(80, 10.002)], {**ATTRS, "friendly_name": "Kitchen oven"})
+    assert hass.states.get(OUT).attributes["friendly_name"] == "Kitchen oven (Filtered)"
+    n = len(writes)
+    await feed(hass, clock, [(t, 10 + jitter(t)) for t in range(90, 140, 10)], {**ATTRS, "friendly_name": "Kitchen oven"})
+    assert len(writes) == n                                # same name: no write
+
+
 # ------------------------------------------------------------------ filtering and publishing
 
 

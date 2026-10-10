@@ -307,18 +307,20 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # ------------------------------------------------------------
         if not self._use_name_mode:
 
+            # (kept for the entity's life: the source can be renamed at any time; the state is
+            # written only when the name changes, never at each value of the source)
             @callback
             def _update_name(_event):
                 st2 = self.hass.states.get(self.cfg.source)
-                if st2 is not None:
-                    base2 = (st2.attributes or {}).get("friendly_name")
-                    if base2 and not base2.startswith("sensor."):
-                        self._attr_name = f"{base2} {self.cfg.suffix}"
-                        self.async_write_ha_state()
-
-                if self._unsub_name:
-                    self._unsub_name()
-                    self._unsub_name = None
+                if st2 is None:
+                    return
+                base2 = (st2.attributes or {}).get("friendly_name")
+                if not base2 or base2.startswith("sensor."):
+                    return
+                name = f"{base2} {self.cfg.suffix}"
+                if name != self._attr_name:
+                    self._attr_name = name
+                    self.async_write_ha_state()
 
             self._unsub_name = async_track_state_change_event(
                 self.hass,

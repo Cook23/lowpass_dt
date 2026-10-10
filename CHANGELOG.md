@@ -40,6 +40,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - **The time constant of the σ estimate stayed at its minimum.** The adaptive deadband estimates σ with an EMA whose time constant starts at 10 × `tau` and grows with time up to `deadband_tau_sigma`. Its starting time was only recorded when the filter had no value yet — but since March 2026 the filter gets its value (last state, or the source's) before any sample. On every entity created since, the time constant stayed at 10 × `tau`, and `deadband_tau_sigma` changed nothing; the "Publish blocked by max_rate_dt" message never appeared. Entities created before kept their starting time across restarts and were not affected. The starting time is now recorded at the first sample, including on entities saved without it.
 
+### Fixed — the name of the filtered entity follows a renamed source
+
+- **A source renamed in Home Assistant kept its old name on the filtered entity until the next restart.** The friendly name was taken from the source once, at its first change. It now follows every rename of the source, and the state is written only when the name changes — never at each value of the source.
+
 ### Changed — fewer warnings in the log
 
 - Normal events are no longer logged as warnings: a new filtered entity, the removal of an orphan, a broad pattern skipping the integration's own entities (debug), a publish held back by `max_rate_dt` (debug), a `total_increasing` value held back (debug) or accepted after a reset. Warnings are kept for configuration errors.
