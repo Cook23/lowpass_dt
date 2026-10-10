@@ -4,6 +4,24 @@ Home Assistant custom integration (HACS): a time-aware low-pass filter for senso
 Code in `custom_components/lowpass_dt/`; user-facing changes go in `CHANGELOG.md` and the
 README "Version highlights".
 
+Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read `BRANCH.md`
+on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
+`main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
+
+## Versions (same rules as history-explorer-card)
+
+- **Release version** `1.4.x` (`1.3.x` on `main`): set in `manifest.json`, the CHANGELOG
+  and the PR title (`1.4.x: …`) by the merge that releases it. `x` goes up by one at each
+  release, and only then. A PR that releases nothing (docs, tests) keeps the version and is
+  titled `Docs: …` / `Tests: …`. 1.4 releases are betas (GitHub pre-releases).
+- **Development build** `1.4.xbyyy` (`x` = the next release): `yyy` goes up by one at each
+  change. Used only while developing and in discussions with the user, never in files:
+  not in code comments, `manifest.json`, the CHANGELOG or commit and PR titles.
+- **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
+  after each merge. Nothing is merged without the user asking.
+- **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,
+  and only at the user's request.
+
 ## Shared logic with history-explorer-card
 
 [Cook23/history-explorer-card](https://github.com/Cook23/history-explorer-card) (a Lovelace
