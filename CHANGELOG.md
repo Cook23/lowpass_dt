@@ -6,7 +6,7 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
-## v1.4.1 (beta) — unreleased
+## v1.4.1 (beta)
 
 ### Added — an attribute as the source
 
@@ -21,7 +21,7 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ### Fixed — `min_rate_dt` or `max_rate_dt` alone
 
-- `min_rate_dt` set below 10 s without `max_rate_dt` (`min_rate_dt: 2`, to write at least every 2 s) conflicted with the default `max_rate_dt` of 10 s: both were set back to their defaults, with a warning, and the heartbeat was an hour. The other one now follows: `max_rate_dt` becomes half of `min_rate_dt` (and `min_rate_dt` twice a `max_rate_dt` set alone above an hour). Both set and in conflict: still the defaults, with a warning.
+- `min_rate_dt` set below 10 s without `max_rate_dt` (`min_rate_dt: 2`, to write at least every 2 s) conflicted with the default `max_rate_dt` of 10 s: both were set back to their defaults, with a warning, and the heartbeat was an hour. The other one now follows: `max_rate_dt` becomes half of `min_rate_dt` (and `min_rate_dt` twice a `max_rate_dt` set alone above an hour). Both set and in conflict: still the defaults, with a warning. (Reported in [discussion #6](https://github.com/Cook23/lowpass_dt/discussions/6) by [@ahemwe](https://github.com/ahemwe).)
 
 ### Fixed — timers started right after each sample
 

@@ -1,8 +1,9 @@
 # lowpass_dt — notes for Claude sessions
 
 Home Assistant custom integration (HACS): a time-aware low-pass filter for sensors.
-Code in `custom_components/lowpass_dt/`; user-facing changes go in `CHANGELOG.md` and the
-README "Version highlights".
+Code in `custom_components/lowpass_dt/`, organized as described in `ARCHITECTURE.md` (keep it
+up to date). User-facing changes go in `CHANGELOG.md`; the README "Version highlights" lists
+new features only, never bug fixes.
 
 Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read `BRANCH.md`
 on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from

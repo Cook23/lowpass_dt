@@ -34,11 +34,11 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
-- **v1.4.1 (beta)** — An attribute as the source (`attribute:`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
-- **v1.4.0 (beta)** — A full review of the code: the exact first-order low-pass whatever the source's rhythm, no more delay of one sample on slow sources, silence detection on new entities at once, safer patterns, `deadband_tau_sigma` effective again, fewer warnings; a test suite against a real Home Assistant.
+- **v1.4.1 (beta)** — An attribute as the source (`attribute:`, or `climate.salon.current_temperature`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
+- **v1.4.0 (beta)** — The exact first-order low-pass whatever the source's rhythm, the output followed between two samples (no more delay of one sample on slow sources); a test suite against a real Home Assistant.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
-- **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
-- **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
+- **v1.3.15** — Zero-order hold (ZOH): each value weighted by the time it was actually in effect, for sparse or impulsive sources.
+- **v1.3.14** — End-of-silence marker, so that a graph drawn with straight lines shows a flat plateau over a silence instead of a diagonal.
 
 ---
 
@@ -393,11 +393,11 @@ lowpass_dt:
 ## 🏗 Architecture
 
 - **LowpassCore** → Pure math engine (Δt-aware, zero-order hold, adaptive sigma, deadband)
-- **TauInjector** → Silence detection & injection
-- **Publisher** → Home Assistant state exposure
+- **TauInjector** → Silence detection, injection, and the output followed between samples
+- **Publisher** → What is written to Home Assistant, and when
 - **HA-native restore** → Clean persistence
 
-Event-driven, no polling, no background loops.
+Event-driven, no polling. How the code is organized, and where a change goes: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
