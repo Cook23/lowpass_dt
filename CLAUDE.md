@@ -18,6 +18,13 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   regime, where all of the above must hold. When the source slows down beyond `tau`, the
   low-pass no longer filters anything useful, but the output must stay sound: within the
   source's range, no overshoot, reaching the source's value, no flood of writes.
+- It is home automation: what is interesting happens over tens of seconds to hours (a
+  minute is a good average) — a house's temperature is roughly a first order of several
+  hours or days; a few seconds of power consumption do not change the monthly bill. The
+  deadband is a filter against what is "not significant", a deliberately loose criterion:
+  write what matters, not what does not, set up by itself, without the user ever saying
+  what matters. Not flight controls, not plate tectonics: keep the precision and the
+  machinery in proportion.
 - The deadband is there so as not to flood the Recorder; it has nothing to do with the
   measurement's uncertainty. What is significant is a change of state of the physical
   system (a big consumer starting): it must be written at once. While the signal just
