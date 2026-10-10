@@ -34,6 +34,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
+- **v1.4.1 (beta)** — An attribute as the source (`attribute:`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class.
 - **v1.4.0 (beta)** — A full review of the code: the exact first-order low-pass whatever the source's rhythm, no more delay of one sample on slow sources, silence detection on new entities at once, safer patterns, `deadband_tau_sigma` effective again, fewer warnings; a test suite against a real Home Assistant.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
 - **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
@@ -229,6 +230,26 @@ No per-sensor tuning is required because parameters adapt automatically.
 
 ---
 
+### Filtering an attribute
+
+```yaml
+lowpass_dt:
+  sensors:
+    - source: weather.home
+      attribute: wind_speed         # sensor.lp_home_wind_speed
+    - source: climate.salon
+      attribute: current_temperature
+  patterns:
+    - match: "climate.*"
+      attribute: current_temperature
+```
+
+With `attribute`, the filter reads that attribute of the source instead of its state, and only a new value of the attribute is a sample (a change of the state or of another attribute is not). The source can be of any domain (`weather`, `climate`, `sun`, `light`…); the filtered entity is an ordinary sensor, named `lp_<source>_<attribute>` and "*Source : Attribute (Filtered)*". A source can have several filtered attributes, and its state filtered as well.
+
+The value is read as [history-explorer-card](https://github.com/Cook23/history-explorer-card) reads it: a number, or a number followed by its unit (`12.5 °C`, `80 %`). Its unit is the one the value gives, else the one Home Assistant shows the attribute in: the `temperature_unit`, `wind_speed_unit`… of a weather entity, the temperature unit of Home Assistant for a thermostat's temperatures, `%` for a light's brightness (converted from 0–255) or a cover's position, and the `X_unit` attribute some integrations give (`temperature_unit` for `inside_temperature`). The device class is derived from that unit, then the source's domain, then the attribute's name (`W` is always `power`; `%` is `humidity` for `humidity`, `battery` for `battery_level`, none otherwise; nothing for a light, a cover or the sun), and the state class from the device class (`measurement` in general). An attribute in `°` is circular only if its name says so (`bearing`, `direction`, `azimuth`, `heading`): a sun's elevation is not.
+
+---
+
 ## 🔧 Fine-Tuning
 
 Set `tau` first — everything rests on it — then the deadband, then, if needed, the rate limits.
@@ -288,6 +309,7 @@ This means that a small variation, smaller than the deadband threshold, will sti
 |-----------|------|------|---------|-------------|
 | `source` | string | — | required | Source sensor entity_id |
 | `match` | string | — | required | Source sensor match string (pattern mode) |
+| `attribute` | string | — | None | Filter this attribute of the source instead of its state (see [Filtering an attribute](#filtering-an-attribute)). With `match`, the pattern applies to entities of every domain that have this attribute. |
 | `tau` | float | seconds | 60.0 | Low-pass time constant — about 10 times the source's usual reporting period (see Fine-Tuning) |
 | `prefix` | string | — | `lp_` | Prefix for generated entity_id |
 | `suffix` | string | — | `(Filtered)` | Suffix added to the friendly name |

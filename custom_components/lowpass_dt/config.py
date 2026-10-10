@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_ATTRIBUTE,
     CONF_DEADBAND,
     CONF_DEADBAND_K_SIGMA,
     CONF_DEADBAND_TAU_SIGMA,
@@ -88,6 +89,18 @@ class LowpassCfg:
 
     unique_id: str | None
     debug: bool
+
+    # filter this attribute of the source instead of its state
+    attribute: str | None = None
+
+    @property
+    def key(self) -> str:
+        """What the filter reads: the source, or the source and one of its attributes."""
+        return cfg_key(self.source, self.attribute)
+
+
+def cfg_key(source: str, attribute: str | None) -> str:
+    return f"{source}.{attribute}" if attribute else source
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,8 +259,18 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             _LOGGER.warning("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
             silence = None
 
+    # attribute (a non-empty string)
+    attribute = item.get(CONF_ATTRIBUTE)
+    if attribute is not None:
+        if isinstance(attribute, str) and attribute.strip():
+            attribute = attribute.strip()
+        else:
+            _LOGGER.warning("Invalid attribute=%r, must be a non-empty string, filtering the state of %r", attribute, source)
+            attribute = None
+
     return LowpassCfg(
         source=source,
+        attribute=attribute,
         tau=tau,
         name=name,
         circular=circular,
@@ -264,6 +287,23 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         debug=debug,
         silence=silence,
     )
+
+
+# ------------------------------------------------------------
+# Friendly name from the source's: "Salon (Filtered)", "Salon : Current temperature (Filtered)"
+# ------------------------------------------------------------
+def source_display_name(base: str, cfg: LowpassCfg) -> str:
+    if cfg.attribute:
+        from .attributes import attribute_label
+        base = f"{base} : {attribute_label(cfg.attribute)}"
+    return f"{base} {cfg.suffix}"
+
+
+def _slugify(text: str) -> str:
+    slug = "".join(c if c.isalnum() else "_" for c in text.lower())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_")
 
 
 # ------------------------------------------------------------
@@ -292,13 +332,9 @@ def compute_name_and_slug(
                 _LOGGER.warning("Invalid source entity_id=%r (missing domain)", cfg.source)
                 base = cfg.source
 
-        name_final = f"{base} {cfg.suffix}"
+        name_final = source_display_name(base, cfg)
 
-    slug = name_final.lower()
-    slug = "".join(c if c.isalnum() else "_" for c in slug)
-    while "__" in slug:
-        slug = slug.replace("__", "_")
-    slug = slug.strip("_")
+    slug = _slugify(name_final)
 
     return name_final, slug, use_name
 
@@ -325,6 +361,10 @@ def make_meta(
             else cfg.source
         )
         seed = f"{cfg.prefix}{source_object_id}"
+        if cfg.attribute:
+            # (the whole entity_id: weather.home and sensor.home, or sensor.home_temperature,
+            # never share a unique_id)
+            seed = f"{cfg.prefix}{cfg.source}.{cfg.attribute}"
 
     unique_id = f"{DOMAIN}::{seed}"
 

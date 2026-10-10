@@ -8,6 +8,12 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 ## v1.4.1 (beta) — unreleased
 
+### Added — an attribute as the source
+
+- **`attribute:`** (in `sensors:` and `patterns:`): the filter reads that attribute of the source instead of its state — a weather's `wind_speed`, a thermostat's `current_temperature`, the sun's `azimuth`. The filtered entity is an ordinary sensor, `sensor.lp_<source>_<attribute>`, named "*Source : Attribute (Filtered)*". Only a new value of the attribute is a sample. A pattern with `attribute` applies to entities of every domain that have it.
+- **Unit** as in [history-explorer-card](https://github.com/Cook23/history-explorer-card): the one the value gives (`12.5 °C`), else the one Home Assistant shows the attribute in (a weather's `*_unit` attributes, Home Assistant's temperature unit, `%` for a brightness or a position, an `X_unit` attribute).
+- **Device class and state class** derived from the unit, the source's domain, then the attribute's name; `measurement` unless the device class requires otherwise. An attribute in `°` is circular only when its name says it is an angle around a circle (`bearing`, `azimuth`…), not a sun's elevation.
+
 ### Fixed — timers started right after each sample
 
 - After each sample, the silence timer and the tracking between samples were started on the next turn of Home Assistant's event loop instead of at once — a leftover of the time the injection ran in a worker thread. They are now started at once, so the timing no longer depends on how busy the loop is. No visible change in normal use; it makes the behavior reproducible on every Home Assistant version tested.

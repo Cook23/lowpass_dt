@@ -4,6 +4,7 @@ CONF_SENSORS = "sensors"                          # list of explicit sensor conf
 CONF_SOURCE = "source"                            # source entity_id for filtering
 CONF_PATTERNS = "patterns"                        # list of pattern-based configs
 CONF_MATCH = "match"                              # fnmatch pattern for auto-matching sensors
+CONF_ATTRIBUTE = "attribute"                      # filter this attribute of the source, not its state
 
 CONF_NAME = "name"                                # explicit friendly name override
 CONF_PREFIX = "prefix"                            # prefix for generated entity_id

@@ -13,6 +13,7 @@ from .const import (
     CONF_SOURCE,
     CONF_PATTERNS,
     CONF_MATCH,
+    CONF_ATTRIBUTE,
     DOMAIN,
 )
 
@@ -21,9 +22,11 @@ from .config import (
     LowpassCfg,
     CfgMeta,
     build_cfg,
+    cfg_key,
     make_meta,
     parse_state,
 )
+from .attributes import attribute_value
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,9 +46,17 @@ def _warn_unknown_keys(where: str, item, allowed: set[str]) -> None:
             _LOGGER.warning("%s: unknown key %r ignored.", where, key)
 
 
-def _is_measurement(state) -> bool:
-    """A state a pattern may filter: numeric, or not known yet (unknown)."""
+def _is_measurement(state, attribute: str | None = None) -> bool:
+    """A state a pattern may filter: numeric, or not known yet (unknown). For an attribute:
+    the entity has it, as a number."""
+    if attribute:
+        return attribute_value(state.entity_id, attribute, state.attributes)[0] is not None
     return state.state == "unknown" or parse_state(state.state)[0] is not None
+
+
+def _pattern_attribute(p: dict) -> str | None:
+    a = p.get(CONF_ATTRIBUTE)
+    return a.strip() if isinstance(a, str) and a.strip() else None
 
 
 def _validate_pattern_item(p: dict) -> str | None:
@@ -125,11 +136,12 @@ async def async_setup_entry_loader(
             continue
 
         # sensors/source chaining allowed
-        explicit[source] = build_cfg(
+        cfg = build_cfg(
             item,
             source=source,
             allow_unique_id=True,
         )
+        explicit[cfg.key] = cfg
 
     # ------------------------------------------------------------
     # Create explicit entities immediately (boot-safe)
@@ -140,11 +152,11 @@ async def async_setup_entry_loader(
 
     for cfg in explicit.values():
         meta = make_meta(hass, cfg)
-        explicit_meta[cfg.source] = meta
+        explicit_meta[cfg.key] = meta
         desired_unique_ids.add(meta.unique_id)
 
     explicit_entities = [
-        sensor_cls(hass, cfg, explicit_meta[cfg.source])
+        sensor_cls(hass, cfg, explicit_meta[cfg.key])
         for cfg in explicit.values()
     ]
 
@@ -173,16 +185,23 @@ async def async_setup_entry_loader(
                 continue
 
             local_count = 0
+            attribute = _pattern_attribute(p)
 
             # Sources: registered sensors, and sensors with a state but no registry entry
-            # (YAML sensors without unique_id), which the dynamic path below filters too
+            # (YAML sensors without unique_id), which the dynamic path below filters too.
+            # For an attribute: entities of every domain (a weather, a climate).
             reg = er.async_get(hass)
-            sources = {e.entity_id for e in reg.entities.values() if e.domain == "sensor"}
-            sources.update(hass.states.async_entity_ids("sensor"))
+            if attribute:
+                sources = {e.entity_id for e in reg.entities.values()}
+                sources.update(hass.states.async_entity_ids())
+            else:
+                sources = {e.entity_id for e in reg.entities.values() if e.domain == "sensor"}
+                sources.update(hass.states.async_entity_ids("sensor"))
 
             for eid in sorted(sources):
 
-                if eid in explicit or eid in keep_cfgs:
+                key = cfg_key(eid, attribute)
+                if key in explicit or key in keep_cfgs:
                     continue
 
                 if not fnmatch.fnmatch(eid, pat):
@@ -194,7 +213,7 @@ async def async_setup_entry_loader(
                     continue
 
                 # -------- KEEP (existence only) --------
-                keep_cfgs[eid] = build_cfg(
+                keep_cfgs[key] = build_cfg(
                     p,
                     source=eid,
                     allow_unique_id=False,
@@ -202,7 +221,7 @@ async def async_setup_entry_loader(
 
                 # -------- CREATE (numeric sources only) --------
                 st = hass.states.get(eid)
-                if st is None or not _is_measurement(st):
+                if st is None or not _is_measurement(st, attribute):
                     continue
 
                 local_count += 1
@@ -211,7 +230,7 @@ async def async_setup_entry_loader(
                     _LOGGER.warning("patterns[]: match=%r exceeded limit=%d. Aborted.", pat, MAX_PATTERN_ENTITIES)
                     break
 
-                create_cfgs[eid] = keep_cfgs[eid]
+                create_cfgs[key] = keep_cfgs[key]
 
         # ------------------------------------------------------------
         # Compute keep_unique_ids
@@ -294,11 +313,8 @@ async def async_setup_entry_loader(
         if not st:
             return
 
-        if st.state in (None, "unknown", "unavailable") or not _is_measurement(st):
-            return
-
-        if new_eid in explicit:
-            return
+        # (the first pattern matching wins, for the state and for each attribute)
+        seen_keys: set[str] = set()
 
         for p in patterns_list:
 
@@ -312,6 +328,21 @@ async def async_setup_entry_loader(
             if _is_own(new_eid):
                 return
 
+            attribute = _pattern_attribute(p)
+            key = cfg_key(new_eid, attribute)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+
+            if attribute:
+                if not _is_measurement(st, attribute):
+                    continue
+            elif st.state in (None, "unknown", "unavailable") or not _is_measurement(st):
+                continue
+
+            if key in explicit:
+                continue
+
             cfg = build_cfg(
                 p,
                 source=new_eid,
@@ -322,7 +353,7 @@ async def async_setup_entry_loader(
 
             # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:
-                return
+                continue
 
             if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
                 _LOGGER.warning("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
@@ -336,8 +367,6 @@ async def async_setup_entry_loader(
             async_add_entities([ent])
 
             own_entity_ids.add(ent.entity_id)
-
-            break
 
     unsub_state_changed = hass.bus.async_listen(
         "state_changed",
