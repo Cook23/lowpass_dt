@@ -4,6 +4,10 @@ Home Assistant custom integration (HACS): a time-aware low-pass filter for senso
 Code in `custom_components/lowpass_dt/`; user-facing changes go in `CHANGELOG.md` and the
 README "Version highlights".
 
+Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read `BRANCH.md`
+on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
+`main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
+
 ## Shared logic with history-explorer-card
 
 [Cook23/history-explorer-card](https://github.com/Cook23/history-explorer-card) (a Lovelace
