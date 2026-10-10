@@ -118,23 +118,25 @@ Review of the silence detection (October 2026), decided by the user:
 - `state_reported` is not listened to: a sensor repeating the same value is most likely
   dead, and treating it as silent is right.
 
-### 3. Attribute units — same tables, lowpass_dt adds the device and state class
+### 3. Attribute units and angles — same tables and rules, lowpass_dt adds the device and state class
 
-| here | card (1.2 only: `src/history-series.js`) |
+| here | card (1.2 only) |
 |---|---|
-| `attributes.py` `attribute_value`, `_attribute_unit` | `attributeValue`, `_seriesValue`, `attributeUnitOf` |
+| `attributes.py` `attribute_value`, `_attribute_unit`, `is_circular_attribute`; `sensor.py` `_resolve_auto_circular` | `src/history-series.js` `attributeValue`, `_seriesValue`, `attributeUnitOf`, `isDirectionAttribute`; `src/card-datasets.js` `_circularPeriod` |
 
 Common rule: the unit is the one the value gives (`12.5 °C`, comma decimal accepted), else
-the weather table (`*_unit` attributes), the domain table (with factors: brightness × 100/255,
-volume_level × 100), Home Assistant's temperature unit for the temperature attributes, else
-the `X_unit` attribute of the longest X the name contains. An `X_unit` attribute has no unit.
+the weather table (`*_unit` attributes; `wind_bearing` in `°`, which Home Assistant gives
+without a unit), the domain table (with factors: brightness × 100/255, volume_level × 100),
+Home Assistant's temperature unit for the temperature attributes, else the `X_unit`
+attribute of the longest X the name contains. An `X_unit` attribute has no unit.
 Both accept the attribute written after the entity_id (`climate.salon.current_temperature`:
 an entity_id has a single dot), and a `unit:` option that always wins.
 
-Differences:
-- Here `wind_bearing` of a weather entity is in `°` (so that it is detected as circular); the
-  card's table has no unit for it (proposed to the card in 1.4.1).
-- The device_class / state_class derivation and the "circular only for angle names" rule for
-  attributes in `°` (not a sun's elevation) exist only here.
+Automatic `circular` for an attribute: `measurement_angle`, or a unit of `°` only when its
+name is a direction (`bearing|direction|azimuth|heading|(^|_)yaw|wind_?dir`): the sun's
+`elevation` is not circular. An entity's own state keeps rule 1.
 
-Introduced in lowpass_dt v1.4.1 / card v1.2.
+Difference: the device_class / state_class derivation exists only here (the card does not
+need them).
+
+Introduced in lowpass_dt v1.4.1 / card v1.2.13.
