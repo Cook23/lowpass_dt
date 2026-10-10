@@ -209,10 +209,15 @@ async def simulate(hass, freezer, samples, options, t_end):
             t += 1.0
             await at(t)
         t = ts
-        await at(t)
-        if x is not None:
-            hass.states.async_set(SRC, repr(x), ATTRS)
-            await hass.async_block_till_done()
+        if x is None:
+            await at(t)
+            break
+        # the timers due before the sample, then the sample: a timer due at the very same
+        # instant would otherwise fire before or after it depending on float rounding
+        await at(t - 1e-3)
+        freezer.move_to(t0 + timedelta(seconds=t))
+        hass.states.async_set(SRC, repr(x), ATTRS)
+        await hass.async_block_till_done()
     return stored
 
 
