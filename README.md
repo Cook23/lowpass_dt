@@ -16,14 +16,16 @@
 > **Version 1.4 is available as a beta**
 >
 > The **1.4** line is published as a beta (pre-release) alongside this **1.3** line, which remains the recommended version. It follows a full review of the code, and makes the integration cleaner and more reliable. What 1.4 changes today:
+> - **the exact first-order low-pass**, whatever the source's rhythm, and **no more delay of one sample** on slow sources (weather): a new value moves the output at once;
 > - **a new filtered entity detects silences at once** — it used to wait for the next restart of Home Assistant;
-> - **an entity_id renamed in Home Assistant is kept**, instead of being set back;
+> - **an entity_id renamed in Home Assistant is kept**, instead of being set back, and the filtered entity's name follows a renamed source;
 > - **a broad pattern** such as `sensor.*` no longer filters the filtered entities themselves;
 > - **the silence injection runs in Home Assistant's event loop**, no longer in a worker thread: a silence always ends the same way;
 > - **patterns** keep the filtered entity of a source without `unique_id` across restarts, scan again after a reload of the integration, and leave out sources that are not numbers (dates, text);
+> - **`deadband_tau_sigma` works again** on entities created since March 2026;
 > - **fewer warnings** in the log: normal events are logged at a lower level, warnings are kept for configuration errors.
 >
-> **To try it**, enable *Show beta versions* for this repository in HACS and download the latest 1.4; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
+> **To try it**, enable *Show beta versions* for this repository in HACS and download 1.4.0; to go back, download 1.3.17 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
 >
 > *Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
 
