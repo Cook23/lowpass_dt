@@ -10,10 +10,12 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
+from .attributes import attribute_value, derived_attributes, is_circular_attribute
 from .config import (
     LowpassCfg,
     CfgMeta,
     parse_state,
+    source_display_name,
 )
 
 from .filter import LowpassCore
@@ -137,6 +139,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             object_id = slug
         else:
             object_id = f"{cfg.prefix}{object_id_src}"
+            if cfg.attribute:
+                object_id = f"{object_id}_{cfg.attribute}"
 
         self.entity_id = f"sensor.{object_id}"
         self._object_id = object_id
@@ -163,6 +167,36 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     def _parse_source_value(self, state_str):
         """Extract numeric value and optional unit from source state string."""
         return parse_state(state_str)
+
+    def _source_value(self, state):
+        """Numeric value and optional unit of the source: its state, or its attribute."""
+        if self.cfg.attribute:
+            return attribute_value(self.cfg.source, self.cfg.attribute, state.attributes)
+        return self._parse_source_value(state.state)
+
+    def _source_attributes(self, attrs) -> dict:
+        """What the entity takes from the source: its attributes, or for an attribute
+        source, the unit, device_class and state_class derived for that attribute."""
+        if self.cfg.attribute:
+            return derived_attributes(
+                self.hass.config.units.temperature_unit,
+                self.cfg.source,
+                self.cfg.attribute,
+                attrs,
+                unit=self.cfg.unit,
+                device_class=self.cfg.device_class,
+            )
+        return attrs
+
+    def _apply_overrides(self) -> None:
+        """unit, device_class and state_class set in the configuration win over the source's."""
+        cfg = self.cfg
+        if cfg.unit is not None:
+            self._attr_native_unit_of_measurement = cfg.unit
+        if cfg.device_class is not None:
+            self._attr_device_class = None if cfg.device_class == "none" else cfg.device_class
+        if cfg.state_class is not None:
+            self._attr_state_class = None if cfg.state_class == "none" else cfg.state_class
 
 
     # ------------------------------------------------------------
@@ -206,7 +240,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         restore_attrs = last_state.attributes if last_state else {}
 
         if src is not None:
-            val, unit = self._parse_source_value(src.state)
+            val, unit = self._source_value(src)
             if val is not None:
                 self._last_source_value = val
                 if unit:
@@ -216,6 +250,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         source_attrs = {}
         if src is not None and isinstance(src.attributes, dict):
             source_attrs = src.attributes
+        source_attrs = self._source_attributes(source_attrs)
 
         # ---- UNIT ----
         unit = restore_attrs.get("unit_of_measurement")
@@ -231,6 +266,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if state_class:
             self._attr_state_class = state_class
 
+        self._apply_overrides()
         self._resolve_auto_circular()
 
         if self.cfg.circular is not None and self._attr_state_class == "total_increasing":
@@ -259,6 +295,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             device_class = source_attrs.get("device_class")
         if device_class:
             self._attr_device_class = device_class
+        self._apply_overrides()
 
         # ---- VALUE ----
         if last_state and last_state.state not in ("unknown", "unavailable"):
@@ -317,7 +354,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 base2 = (st2.attributes or {}).get("friendly_name")
                 if not base2 or base2.startswith("sensor."):
                     return
-                name = f"{base2} {self.cfg.suffix}"
+                name = source_display_name(base2, self.cfg)
                 if name != self._attr_name:
                     self._attr_name = name
                     self.async_write_ha_state()
@@ -443,6 +480,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # Unit, icon, device_class and state_class follow the source's
     # ------------------------------------------------------------
     def sync_source_attributes(self, attrs) -> None:
+        attrs = self._source_attributes(attrs)
+
         unit = attrs.get("unit_of_measurement")
         if unit is not None:
             self._attr_native_unit_of_measurement = unit
@@ -452,7 +491,10 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self._attr_icon = icon
 
         device_class = attrs.get("device_class")
-        if device_class is not None:
+        if self.cfg.device_class is not None:
+            device_class = self.cfg.device_class
+        if device_class is not None or self.cfg.attribute:
+            # (derived for an attribute: none is a result too)
             self._attr_device_class = device_class
 
         # state_class: the source's, or else inferred from its device_class
@@ -464,6 +506,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 self._attr_state_class = "measurement"
             elif device_class in _TOTAL_DEVICE_CLASSES:
                 self._attr_state_class = "total"
+
+        self._apply_overrides()
 
         # (unit / state_class only known now can make the source an angle)
         self._resolve_auto_circular()
@@ -478,7 +522,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             return
         if self._attr_state_class == "total_increasing":
             return
-        if self._attr_state_class == "measurement_angle" or self._attr_native_unit_of_measurement == "°":
+        angle_unit = self._attr_native_unit_of_measurement == "°"
+        if self.cfg.attribute and not is_circular_attribute(self.cfg.attribute):
+            # (a sun's elevation, a cover's tilt: in °, but not around a circle)
+            angle_unit = False
+        if self._attr_state_class == "measurement_angle" or angle_unit:
             self.cfg.circular = 360.0
             self.cfg.circular_auto = False
             self._circular_from_auto = True
@@ -524,9 +572,15 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if new_state is None:
             return
 
-        x, unit = self._parse_source_value(new_state.state)
+        x, unit = self._source_value(new_state)
         if x is None:
             return
+        if self.cfg.attribute:
+            # (the source changes for its state or its other attributes too: only a new
+            # value of the attribute is a sample)
+            old_state = event.data.get("old_state")
+            if old_state is not None and self._source_value(old_state)[0] == x:
+                return
         if unit and not self._attr_native_unit_of_measurement:
             self._attr_native_unit_of_measurement = unit
             # (a unit only known now can make the source an angle)

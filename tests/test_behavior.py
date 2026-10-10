@@ -207,12 +207,17 @@ async def simulate(hass, freezer, samples, options, t_end):
     for ts, x in samples[1:] + [(t_end, None)]:
         while ts - t > 1.0:            # a gap: let the timers run, second by second
             t += 1.0
-            await at(t)
+            await at(t - 0.5)          # (between whole seconds, where the timers fall)
         t = ts
-        await at(t)
-        if x is not None:
-            hass.states.async_set(SRC, repr(x), ATTRS)
-            await hass.async_block_till_done()
+        if x is None:
+            await at(t)
+            break
+        # the timers due before the sample, then the sample: a timer due at the very same
+        # instant would otherwise fire before or after it depending on float rounding
+        await at(t - 1e-3)
+        freezer.move_to(t0 + timedelta(seconds=t))
+        hass.states.async_set(SRC, repr(x), ATTRS)
+        await hass.async_block_till_done()
     return stored
 
 
@@ -339,8 +344,7 @@ async def test_normal_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, fr
 
 async def test_normal_silence_resume_redrawn_by_tension_spline(hass: HomeAssistant, freezer):
     """The same, drawn by Chart.js 'tension: 0.4': where the output starts rising again, the
-    spline rounds the corner; it stays within 1 (5 % of the step) once the rise is the
-    exact exponential."""
+    spline rounds the corner; it stays within 1 (5 % of the step)."""
     rng = random.Random(2)
     tau, t_end = 100.0, 3 * 3600.0
     samples = [(10.0 * k, round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
@@ -503,3 +507,21 @@ async def test_source_slowing_down_stays_sound(hass: HomeAssistant, freezer):
     s = report("slowing down", samples, stored, tau, t_end)
     assert sound(samples, stored)
     assert s["rms_err_linear"] < 0.5
+
+
+# A battery's power, at rest at 12 W between short bursts every 2 s, tau only 2.5 times
+# the source's period (discussion #6, real data): not what the filter is for, but at each
+# rest the output must reach 12 W during the silence, not stay at the last burst's value
+# (up to 1.3.17, the injection stopped after its first sample).
+BATTERY_REST = [(0.0, 12), (68.271, 78), (69.275, 462), (71.292, 297), (73.31, 156), (87.416, 147), (89.43, 153), (91.445, 150), (93.461, 147), (97.488, 12), (1522.07, 1032), (1523.078, 1029), (1524.087, 456), (1526.1, 288), (1528.116, 156), (1540.189, 150), (1542.2, 153), (1544.217, 141), (1546.227, 153), (1548.235, 156), (1550.243, 159), (1554.266, 12)]
+
+
+@pytest.mark.parametrize("options", [{"tau": 5, "deadband": 0}, {"tau": 5}])
+async def test_edge_battery_at_rest_reaches_its_value_in_each_silence(hass: HomeAssistant, freezer, options):
+    stored = await simulate(hass, freezer, BATTERY_REST, options, 1700)
+    for t_rest in (97.488, 1554.266):  # the source drops to 12 W, then is silent
+        after = [v for t, v in stored if t_rest < t < t_rest + 60]
+        assert after and after[-1] == 12.0
+        assert all(12.0 <= v <= 1032 for v in after)
+    if "deadband" in options:  # (every write is the exact first-order value)
+        assert all(abs(v - ideal(BATTERY_REST, 5, t)) < 0.01 for t, v in stored[1:])

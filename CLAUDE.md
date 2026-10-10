@@ -1,8 +1,9 @@
 # lowpass_dt — notes for Claude sessions
 
 Home Assistant custom integration (HACS): a time-aware low-pass filter for sensors.
-Code in `custom_components/lowpass_dt/`; user-facing changes go in `CHANGELOG.md` and the
-README "Version highlights".
+Code in `custom_components/lowpass_dt/`, organized as described in `ARCHITECTURE.md` (keep it
+up to date). User-facing changes go in `CHANGELOG.md`; the README "Version highlights" lists
+new features only, never bug fixes.
 
 Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read `BRANCH.md`
 on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
@@ -116,3 +117,24 @@ Review of the silence detection (October 2026), decided by the user:
   (e.g. `max(0.1 s, 5 % of the mean)`) would have to change in the card too.
 - `state_reported` is not listened to: a sensor repeating the same value is most likely
   dead, and treating it as silent is right.
+
+### 3. Attribute units — same tables, lowpass_dt adds the device and state class
+
+| here | card (1.2 only: `src/history-series.js`) |
+|---|---|
+| `attributes.py` `attribute_value`, `_attribute_unit` | `attributeValue`, `_seriesValue`, `attributeUnitOf` |
+
+Common rule: the unit is the one the value gives (`12.5 °C`, comma decimal accepted), else
+the weather table (`*_unit` attributes), the domain table (with factors: brightness × 100/255,
+volume_level × 100), Home Assistant's temperature unit for the temperature attributes, else
+the `X_unit` attribute of the longest X the name contains. An `X_unit` attribute has no unit.
+Both accept the attribute written after the entity_id (`climate.salon.current_temperature`:
+an entity_id has a single dot), and a `unit:` option that always wins.
+
+Differences:
+- Here `wind_bearing` of a weather entity is in `°` (so that it is detected as circular); the
+  card's table has no unit for it (proposed to the card in 1.4.1).
+- The device_class / state_class derivation and the "circular only for angle names" rule for
+  attributes in `°` (not a sun's elevation) exist only here.
+
+Introduced in lowpass_dt v1.4.1 / card v1.2.

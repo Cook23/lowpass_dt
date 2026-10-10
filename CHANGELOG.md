@@ -2,9 +2,30 @@
 
 All notable user-facing changes to this integration are documented here.
 
-This changelog starts at **v1.3.14** — earlier versions were not tracked.
+This changelog starts at **v1.3.14** — earlier versions were not tracked, except for one change of v1.3.10 documented afterwards.
 
 ---
+
+## v1.4.1 (beta)
+
+### Added — an attribute as the source
+
+- **`attribute:`** (in `sensors:` and `patterns:`): the filter reads that attribute of the source instead of its state — a weather's `wind_speed`, a thermostat's `current_temperature`, the sun's `azimuth`. The filtered entity is an ordinary sensor, `sensor.lp_<source>_<attribute>`, named "*Source : Attribute (Filtered)*". Only a new value of the attribute is a sample. A pattern with `attribute` applies to entities of every domain that have it.
+- **Unit** as in [history-explorer-card](https://github.com/Cook23/history-explorer-card): the one the value gives (`12.5 °C`), else the one Home Assistant shows the attribute in (a weather's `*_unit` attributes, Home Assistant's temperature unit, `%` for a brightness or a position, an `X_unit` attribute).
+- **Device class and state class** derived from the unit, the source's domain, then the attribute's name; `measurement` unless the device class requires otherwise. An attribute in `°` is circular only when its name says it is an angle around a circle (`bearing`, `azimuth`…), not a sun's elevation.
+- **Written after the entity_id**, as in the card: `source: climate.salon.current_temperature` is the same as `attribute: current_temperature`.
+
+### Added — `unit`, `device_class` and `state_class`
+
+- Set on any filtered entity — a state or an attribute — they win over the source's or the derived ones (`none` for no device class or state class). With `unit:` alone on an attribute, the device class is derived from that unit. An invalid value is ignored with a warning.
+
+### Fixed — `min_rate_dt` or `max_rate_dt` alone
+
+- `min_rate_dt` set below 10 s without `max_rate_dt` (`min_rate_dt: 2`, to write at least every 2 s) conflicted with the default `max_rate_dt` of 10 s: both were set back to their defaults, with a warning, and the heartbeat was an hour. The other one now follows: `max_rate_dt` becomes half of `min_rate_dt` (and `min_rate_dt` twice a `max_rate_dt` set alone above an hour). Both set and in conflict: still the defaults, with a warning. (Reported in [discussion #6](https://github.com/Cook23/lowpass_dt/discussions/6) by [@ahemwe](https://github.com/ahemwe).)
+
+### Fixed — timers started right after each sample
+
+- After each sample, the silence timer and the tracking between samples were started on the next turn of Home Assistant's event loop instead of at once — a leftover of the time the injection ran in a worker thread. They are now started at once, so the timing no longer depends on how busy the loop is. No visible change in normal use; it makes the behavior reproducible on every Home Assistant version tested.
 
 ## v1.4.0 (beta)
 
@@ -126,3 +147,11 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 
 - `should_publish()` now compares against the sensor's actual published state (`sensor._attr_native_value`) instead of a separate internal copy (`core.last_published`), removing a possible desync between what the filter believes was last published and what Home Assistant actually shows. `core.last_published`, along with the now-unused `finalize_publish()` / `export_state()` / `import_state()` helpers built around it, has been removed; `core.time_last_pub` is set directly.
 - `should_publish()` accepts a new `marker` parameter, allowing a check to be performed without triggering a real publish — used internally to decide when the end-of-silence marker should fire.
+
+## v1.3.10
+
+*(documented afterwards, in v1.4.1)*
+
+### Changed — a margin of 0.1 s in the silence detection
+
+- The silence threshold became `mean + 3σ + 0.1 s` (it was `mean + 3σ`) — the mean and σ being those of the intervals between the source's values. On a very regular source, σ is close to 0, and it is exactly 0 at first (the statistics start from the first interval alone): the threshold was then the usual interval itself, and a value arriving a few milliseconds late — Home Assistant's own latency — was taken for a silence, at almost every value. The margin absorbs that jitter. Below 1 s, the threshold's floor of 1 s already does. It does not cover a skipped value (an interval twice the usual one), which is a silence by this rule.

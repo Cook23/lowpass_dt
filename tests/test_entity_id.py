@@ -3,11 +3,17 @@ behind the user's back. Every registry event of the integration is recorded and 
 through the asynchronous paths where Home Assistant could pick another id: source not yet
 known, friendly name arriving later, pattern creation at startup and at runtime, reload,
 and the UI's "Recreate entity IDs"."""
+import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .conftest import setup_lowpass
+
+# "Recreate entity IDs" regenerates an id from the registry entry's suggested_object_id
+# and object_id_base, which older Home Assistant versions do not store
+_RECREATE = hasattr(er.RegistryEntry, "suggested_object_id") and hasattr(er.EntityRegistry, "async_regenerate_entity_id")
+needs_recreate = pytest.mark.skipif(not _RECREATE, reason="no 'Recreate entity IDs' in this Home Assistant version")
 
 ATTRS = {"unit_of_measurement": "W", "state_class": "measurement"}
 
@@ -112,6 +118,7 @@ async def test_reload_keeps_entity_id(hass: HomeAssistant):
     assert lowpass_ids(hass) == ["sensor.lp_src"]
 
 
+@needs_recreate
 async def test_recreate_entity_ids_in_ui_gives_lp_id(hass: HomeAssistant):
     """The UI's "Recreate entity IDs" regenerates the id from the registry entry: the
     integration's id is stored there as suggested_object_id, which wins over the name."""
@@ -123,6 +130,7 @@ async def test_recreate_entity_ids_in_ui_gives_lp_id(hass: HomeAssistant):
     assert reg.async_regenerate_entity_id(entry) == "sensor.lp_src"
 
 
+@needs_recreate
 async def test_entry_registered_by_1_3_17_is_kept_and_fixed_for_recreate(hass: HomeAssistant):
     """An entry created by 1.3.17: renamed to lp_src, with no suggested_object_id and the
     name as object_id_base. Its id is kept, and from the first start it stores lp_src as

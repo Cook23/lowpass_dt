@@ -6,10 +6,15 @@ import re
 
 from dataclasses import dataclass
 
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    CONF_ATTRIBUTE,
     CONF_DEADBAND,
+    CONF_DEVICE_CLASS,
+    CONF_STATE_CLASS,
+    CONF_UNIT,
     CONF_DEADBAND_K_SIGMA,
     CONF_DEADBAND_TAU_SIGMA,
     CONF_MAX_RATE_DT,
@@ -89,6 +94,23 @@ class LowpassCfg:
     unique_id: str | None
     debug: bool
 
+    # filter this attribute of the source instead of its state
+    attribute: str | None = None
+
+    # overrides of what the source gives or what is derived ('none': none at all)
+    unit: str | None = None
+    device_class: str | None = None
+    state_class: str | None = None
+
+    @property
+    def key(self) -> str:
+        """What the filter reads: the source, or the source and one of its attributes."""
+        return cfg_key(self.source, self.attribute)
+
+
+def cfg_key(source: str, attribute: str | None) -> str:
+    return f"{source}.{attribute}" if attribute else source
+
 
 @dataclass(frozen=True, slots=True)
 class CfgMeta:
@@ -97,6 +119,20 @@ class CfgMeta:
     use_name: bool
     unique_id: str
     unique_id_seed: str
+
+
+# ------------------------------------------------------------
+# device_class / state_class override: a value Home Assistant knows, or 'none'
+# ------------------------------------------------------------
+def _class_override(item: dict, key: str, enum, source: str) -> str | None:
+    raw = item.get(key)
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if value == "none" or value in {str(v) for v in enum}:
+        return value
+    _LOGGER.warning("Invalid %s=%r for source=%r, ignored (expected one of Home Assistant's, or none)", key, raw, source)
+    return None
 
 
 # ------------------------------------------------------------
@@ -188,6 +224,14 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         _LOGGER.warning("Invalid min_rate_dt=%r, must be >= 0, using default 3600.0", item.get(CONF_MIN_RATE_DT))
         min_rate_dt = 3600.0
 
+    # Only one of the two given, at odds with the other's default: the other follows it
+    # (min_rate_dt: 2 alone asks for a write every 2 s at least, not for the defaults)
+    if max_rate_dt >= min_rate_dt:
+        if CONF_MAX_RATE_DT not in item and CONF_MIN_RATE_DT in item:
+            max_rate_dt = min_rate_dt / 2
+        elif CONF_MIN_RATE_DT not in item and CONF_MAX_RATE_DT in item:
+            min_rate_dt = max_rate_dt * 2
+
     if max_rate_dt >= min_rate_dt:
         _LOGGER.warning("Invalid max_rate_dt=%r >= min_rate_dt=%r, publish interval must satisfy max_rate_dt < min_rate_dt, using defaults 10.0 and 3600.0", item.get(CONF_MAX_RATE_DT), item.get(CONF_MIN_RATE_DT))
         max_rate_dt = 10.0
@@ -246,8 +290,40 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             _LOGGER.warning("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
             silence = None
 
+    # attribute (a non-empty string), or written after the entity_id as in
+    # history-explorer-card: climate.salon.current_temperature (an entity_id has one dot)
+    attribute = item.get(CONF_ATTRIBUTE)
+    if attribute is not None:
+        if isinstance(attribute, str) and attribute.strip():
+            attribute = attribute.strip()
+        else:
+            _LOGGER.warning("Invalid attribute=%r, must be a non-empty string, filtering the state of %r", attribute, source)
+            attribute = None
+    parts = source.split(".", 2)
+    if len(parts) == 3:
+        if attribute is not None and attribute != parts[2]:
+            _LOGGER.warning("source=%r names attribute %r, but attribute=%r: using %r", source, parts[2], attribute, attribute)
+        source = f"{parts[0]}.{parts[1]}"
+        attribute = attribute or parts[2]
+
+    # unit (a non-empty string)
+    unit = item.get(CONF_UNIT)
+    if unit is not None:
+        if isinstance(unit, str) and unit.strip():
+            unit = unit.strip()
+        else:
+            _LOGGER.warning("Invalid unit=%r, must be a non-empty string, ignored for source=%r", unit, source)
+            unit = None
+
+    device_class = _class_override(item, CONF_DEVICE_CLASS, SensorDeviceClass, source)
+    state_class = _class_override(item, CONF_STATE_CLASS, SensorStateClass, source)
+
     return LowpassCfg(
         source=source,
+        attribute=attribute,
+        unit=unit,
+        device_class=device_class,
+        state_class=state_class,
         tau=tau,
         name=name,
         circular=circular,
@@ -264,6 +340,23 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         debug=debug,
         silence=silence,
     )
+
+
+# ------------------------------------------------------------
+# Friendly name from the source's: "Salon (Filtered)", "Salon : Current temperature (Filtered)"
+# ------------------------------------------------------------
+def source_display_name(base: str, cfg: LowpassCfg) -> str:
+    if cfg.attribute:
+        from .attributes import attribute_label
+        base = f"{base} : {attribute_label(cfg.attribute)}"
+    return f"{base} {cfg.suffix}"
+
+
+def _slugify(text: str) -> str:
+    slug = "".join(c if c.isalnum() else "_" for c in text.lower())
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug.strip("_")
 
 
 # ------------------------------------------------------------
@@ -292,13 +385,9 @@ def compute_name_and_slug(
                 _LOGGER.warning("Invalid source entity_id=%r (missing domain)", cfg.source)
                 base = cfg.source
 
-        name_final = f"{base} {cfg.suffix}"
+        name_final = source_display_name(base, cfg)
 
-    slug = name_final.lower()
-    slug = "".join(c if c.isalnum() else "_" for c in slug)
-    while "__" in slug:
-        slug = slug.replace("__", "_")
-    slug = slug.strip("_")
+    slug = _slugify(name_final)
 
     return name_final, slug, use_name
 
@@ -325,6 +414,10 @@ def make_meta(
             else cfg.source
         )
         seed = f"{cfg.prefix}{source_object_id}"
+        if cfg.attribute:
+            # (the whole entity_id: weather.home and sensor.home, or sensor.home_temperature,
+            # never share a unique_id)
+            seed = f"{cfg.prefix}{cfg.source}.{cfg.attribute}"
 
     unique_id = f"{DOMAIN}::{seed}"
 

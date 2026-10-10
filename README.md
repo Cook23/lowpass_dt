@@ -34,10 +34,11 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
 
-- **v1.4.0 (beta)** — A full review of the code: the exact first-order low-pass whatever the source's rhythm, no more delay of one sample on slow sources, silence detection on new entities at once, safer patterns, `deadband_tau_sigma` effective again, fewer warnings; a test suite against a real Home Assistant.
+- **v1.4.1 (beta)** — An attribute as the source (`attribute:`, or `climate.salon.current_temperature`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
+- **v1.4.0 (beta)** — The exact first-order low-pass whatever the source's rhythm, the output followed between two samples (no more delay of one sample on slow sources); a test suite against a real Home Assistant.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
-- **v1.3.15** — Zero-order hold (ZOH) time-aware integration: `dt[n]` is now applied to the previous known value instead of the newly arrived one, fixing incorrect time weighting on sparse/impulsive signals.
-- **v1.3.14** — End-of-silence marker to avoid misleading diagonal interpolation on `line` graphs after a silence period.
+- **v1.3.15** — Zero-order hold (ZOH): each value weighted by the time it was actually in effect, for sparse or impulsive sources.
+- **v1.3.14** — End-of-silence marker, so that a graph drawn with straight lines shows a flat plateau over a silence instead of a diagonal.
 
 ---
 
@@ -175,6 +176,10 @@ The deadband threshold is estimated from the signal's own variability over time,
 
 ## 📦 Install
 
+### Home Assistant versions
+
+The 1.4 line is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older ones are not tested.
+
 ### HACS (recommended)
 
 Add this repository as a **custom repository** in HACS: `https://github.com/Cook23/lowpass_dt`
@@ -222,6 +227,31 @@ lowpass_dt:
 ```
 
 No per-sensor tuning is required because parameters adapt automatically.
+
+---
+
+### Filtering an attribute
+
+```yaml
+lowpass_dt:
+  sensors:
+    - source: weather.home
+      attribute: wind_speed         # sensor.lp_home_wind_speed
+    - source: climate.salon.current_temperature   # the same as attribute: current_temperature
+    - source: sensor.box
+      attribute: level
+      unit: "%"                     # when nothing gives it
+      device_class: moisture        # instead of the one derived
+  patterns:
+    - match: "climate.*"
+      attribute: current_temperature
+```
+
+With `attribute`, the filter reads that attribute of the source instead of its state, and only a new value of the attribute is a sample (a change of the state or of another attribute is not). The source can be of any domain (`weather`, `climate`, `sun`, `light`…); the filtered entity is an ordinary sensor, named `lp_<source>_<attribute>` and "*Source : Attribute (Filtered)*". A source can have several filtered attributes, and its state filtered as well.
+
+The value is read as [history-explorer-card](https://github.com/Cook23/history-explorer-card) reads it: a number, or a number followed by its unit (`12.5 °C`, `80 %`). Its unit is the one the value gives, else the one Home Assistant shows the attribute in: the `temperature_unit`, `wind_speed_unit`… of a weather entity, the temperature unit of Home Assistant for a thermostat's temperatures, `%` for a light's brightness (converted from 0–255) or a cover's position, and the `X_unit` attribute some integrations give (`temperature_unit` for `inside_temperature`). The device class is derived from that unit, then the source's domain, then the attribute's name (`W` is always `power`; `%` is `humidity` for `humidity`, `battery` for `battery_level`, none otherwise; nothing for a light, a cover or the sun), and the state class from the device class (`measurement` in general). An attribute in `°` is circular only if its name says so (`bearing`, `direction`, `azimuth`, `heading`): a sun's elevation is not.
+
+As in the card, the attribute can be written after the entity_id (`source: climate.salon.current_temperature`), and `unit:` always wins. `device_class:` and `state_class:` set those too (`none`: none at all); with `unit:` alone, the device class is derived from it.
 
 ---
 
@@ -284,6 +314,10 @@ This means that a small variation, smaller than the deadband threshold, will sti
 |-----------|------|------|---------|-------------|
 | `source` | string | — | required | Source sensor entity_id |
 | `match` | string | — | required | Source sensor match string (pattern mode) |
+| `unit` | string | — | the source's | Unit of the filtered entity, instead of the source's or the one derived for an attribute |
+| `device_class` | string | — | the source's | Device class of the filtered entity (one of Home Assistant's, or `none`), instead of the source's or the one derived |
+| `state_class` | string | — | the source's | State class of the filtered entity (`measurement`, `total`…, or `none`), instead of the source's or the one derived |
+| `attribute` | string | — | None | Filter this attribute of the source instead of its state (see [Filtering an attribute](#filtering-an-attribute)). With `match`, the pattern applies to entities of every domain that have this attribute. |
 | `tau` | float | seconds | 60.0 | Low-pass time constant — about 10 times the source's usual reporting period (see Fine-Tuning) |
 | `prefix` | string | — | `lp_` | Prefix for generated entity_id |
 | `suffix` | string | — | `(Filtered)` | Suffix added to the friendly name |
@@ -302,6 +336,8 @@ This means that a small variation, smaller than the deadband threshold, will sti
 A match string should avoid matching already filtered entities. A prefix is added to the generated entity_id to prevent this. Recursion is automatically blocked if a misconfigured match string matches filtered entities. Creation is limited to 100 entities per match string. When a source matches several patterns, the first matching pattern in the list applies.
 
 `min_rate_dt` and `max_rate_dt` name a *duration* (`dt`, an interval in seconds), not a *rate* — the "min"/"max" refers to the resulting publish rate they enforce, not to the duration itself. This is the same inversion as frequency vs. period: a *maximum* frequency corresponds to a *minimum* period, and vice versa. So `min_rate_dt` (the smallest allowed rate) is enforced by the *largest* interval — it's the heartbeat ceiling, firing at most this rarely. `max_rate_dt` (the largest allowed rate) is enforced by the *smallest* interval — it's the rate limiter floor, firing at most this often.
+
+When only one of the two is set and it conflicts with the other's default, the other follows it: `min_rate_dt: 2` alone sets `max_rate_dt` to 1, `max_rate_dt: 7200` alone sets `min_rate_dt` to 14400.
 
 `min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
 `max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached with the adaptive deadband — a warning is logged when it blocks a publish once σ has settled. With a fixed `deadband` (including `0`) it is the normal rate limiter, and blocked publishes are not logged.
@@ -357,11 +393,11 @@ lowpass_dt:
 ## 🏗 Architecture
 
 - **LowpassCore** → Pure math engine (Δt-aware, zero-order hold, adaptive sigma, deadband)
-- **TauInjector** → Silence detection & injection
-- **Publisher** → Home Assistant state exposure
+- **TauInjector** → Silence detection, injection, and the output followed between samples
+- **Publisher** → What is written to Home Assistant, and when
 - **HA-native restore** → Clean persistence
 
-Event-driven, no polling, no background loops.
+Event-driven, no polling. How the code is organized, and where a change goes: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 

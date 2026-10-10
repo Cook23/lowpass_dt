@@ -62,6 +62,14 @@ def test_rates_must_be_ordered():
     assert (c.max_rate_dt, c.min_rate_dt) == (10.0, 3600.0)
 
 
+def test_one_rate_alone_moves_the_other_default():
+    """min_rate_dt: 2 alone asks for a write every 2 s at least (discussion #6)."""
+    c = cfg(min_rate_dt=2)
+    assert (c.max_rate_dt, c.min_rate_dt) == (1.0, 2.0)
+    c = cfg(max_rate_dt=7200)
+    assert (c.max_rate_dt, c.min_rate_dt) == (7200.0, 14400.0)
+
+
 def test_negative_deadband_disabled():
     assert cfg(deadband=-1).deadband is None
     assert cfg(deadband=0).deadband == 0.0
