@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
@@ -7,6 +9,11 @@ from homeassistant.helpers.typing import ConfigType
 from .const import DOMAIN
 
 PLATFORMS = ["sensor"]
+
+# Deliberately permissive: the section is passed through as is, and each option is
+# checked by config.build_cfg / loader.py, which warn and fall back to a default instead
+# of rejecting the whole configuration (one typo must not disable every filter).
+CONFIG_SCHEMA = vol.Schema({vol.Optional(DOMAIN): vol.Any(None, dict)}, extra=vol.ALLOW_EXTRA)
 
 # ------------------------------------------------------------
 # YAML sync: create/update/remove config entry
