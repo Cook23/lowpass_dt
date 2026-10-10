@@ -24,6 +24,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked.
 - **Nothing was scanned after a reload.** Patterns were scanned, and orphans cleaned up, only when Home Assistant finished starting: after a reload of the integration, a matching source got its filtered entity back only at its next change. The scan now runs at once when Home Assistant is already running.
 - **Dates and text sensors were filtered as numbers.** A pattern also matched sensors whose state is not a measurement, and `2026-10-10` was read as 2026 with `-10-10` as its unit. A state is now a number, optionally followed by a unit that does not start with a digit or a separator: dates, times, version numbers and decimal commas are not measurements. Patterns only create filtered entities for numeric sources.
 
+### Fixed — decimals
+
+- **The first value had one decimal more than the next ones.** With the dynamic rounding (no `round` set), the number of decimals is derived from the deadband, with a hysteresis so that it does not flicker. The first value used a different formula, which gave one decimal more than every following value with the same deadband. Both now agree.
+
 ---
 
 ## v1.3.17

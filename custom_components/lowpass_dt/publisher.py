@@ -12,8 +12,10 @@ def _update_decimals(deadband: float | None, current_decimals: int | None) -> in
     if deadband is None or deadband <= 0:
         return current_decimals if current_decimals is not None else 2
 
+    # (first value: the middle of the hysteresis band below, where the following values
+    # stay — d is kept while 10^-(d-0.5) <= deadband <= 10^-(d-1.5))
     if current_decimals is None:
-        return min(6, max(0, int(math.ceil(-math.log10(deadband))) + 1))
+        return min(6, max(0, math.floor(-math.log10(deadband) + 1.5)))
 
     threshold_up = 10 ** (-(current_decimals - 1 + 0.5))
     if deadband < threshold_up:
