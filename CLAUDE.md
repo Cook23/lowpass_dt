@@ -60,11 +60,14 @@ Differences (keep them in mind before calling the two "identical"):
 - The end-of-silence marker (v1.3.14) and the `silence` option (`none`/`last`/`zero`/`unknown`)
   exist only here.
 
-Open proposals from a review of this silence detection, made in the card's session and never
-decided by the user (nothing done, do not implement without asking):
-1. After a Home Assistant restart, the interval spanning the downtime enters the EMA as is;
-   clamping every interval to the limit in `_update_dt_stats`, as the card does, would avoid it.
-2. The +0.1 s margin is absolute, so a very regular source can get false silences from jitter;
-   a relative margin would avoid it.
-Decided, no change: not listening to `state_reported` — a sensor repeating the same value is
-most likely dead, and treating it as silent is right.
+Review of the silence detection (October 2026), decided by the user:
+- After a Home Assistant restart, the downtime is already kept out of the EMA: on restore,
+  `sensor.py` sets `injector.source_just_resumed`, so the first sample counts as the limit
+  (same as after a silence, `injector.py` `set_last_source_time`). Not an issue, nothing to do.
+- The +0.1 s margin is absolute: a very regular source (σ close to 0) can get a false
+  silence from a delay of a few tenths of a second. Here that only means an extra injected
+  sample, maybe published (and maybe an end-of-silence marker); the filtered value barely
+  moves, since injection holds the last value as ZOH would. Left as is. A relative margin
+  (e.g. `max(0.1 s, 5 % of the mean)`) would have to change in the card too.
+- `state_reported` is not listened to: a sensor repeating the same value is most likely
+  dead, and treating it as silent is right.
