@@ -8,9 +8,8 @@
 
 # Lowpass DT – Deterministic Time-Aware Filter for Home Assistant
 
-> ⚠️ **Experimental – tested by exactly one person: me.**
+> ⚠️ **Experimental – used in real life by one person: me**, and checked by an automated test suite against a real Home Assistant.
 > Works well in my environment. May break yours. Back up Home Assistant before installing.
-> Extensive logging is intentional during this validation phase and will be reduced in future stable versions.
 
 > [!IMPORTANT]
 > **This is version 1.4, a beta**
@@ -22,7 +21,8 @@
 > - **the silence injection runs in Home Assistant's event loop**, no longer in a worker thread: a silence always ends the same way;
 > - **patterns** keep the filtered entity of a source without `unique_id` across restarts, scan again after a reload of the integration, and leave out sources that are not numbers (dates, text);
 > - **fewer warnings** in the log: normal events are logged at a lower level, warnings are kept for configuration errors;
-> - **the exact first-order low-pass**, whatever the source's rhythm, and **no more delay of one sample** on slow sources (weather): a new value moves the output at once.
+> - **the exact first-order low-pass**, whatever the source's rhythm, and **no more delay of one sample** on slow sources (weather): a new value moves the output at once;
+> - **an attribute as the source** (a weather's wind speed, a thermostat's temperature), and `unit`, `device_class` and `state_class` to set them on any filtered entity.
 >
 > **To try it**, enable *Show beta versions* for this repository in HACS and download the latest 1.4; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
 >
@@ -32,7 +32,7 @@
 
 ## 📋 Version highlights
 
-A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
+A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/v1.4-dev/CHANGELOG.md) for the complete, version-by-version detail.
 
 - **v1.4.1 (beta)** — An attribute as the source (`attribute:`, or `climate.salon.current_temperature`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
 - **v1.4.0 (beta)** — The exact first-order low-pass whatever the source's rhythm, the output followed between two samples (no more delay of one sample on slow sources); a test suite against a real Home Assistant.
@@ -130,7 +130,7 @@ The integration uses a **zero-order hold (ZOH)** formulation: `dt[n]` — the ti
 When a sensor stops publishing for longer than:
 
 ```
-dt_silence = min(mean(dt) + 3σ, tau)      (never less than 1 s)
+dt_silence = min(mean(dt) + 3σ + 0.1 s, tau)      (never less than 1 s)
 ```
 
 The silence threshold is learned automatically from the source's observed update rate, and capped at `tau`: once `tau` has elapsed with no new value, the last value is treated as still in effect and the filter starts converging toward it. This is a *timing* estimate (how long between updates), completely independent from the adaptive deadband (which estimates the variability of the *value*). Disabling the deadband with `deadband: 0` has no effect on silence detection, and vice versa. When silence is detected:
@@ -144,7 +144,7 @@ No frozen fake values. No interpolation artifacts.
 
 Unlike Home Assistant's built-in low-pass filter, which simply has nothing left to do once its source stops emitting events, lowpass_dt keeps working during silence: it actively drives the output toward the source's last known value instead of leaving it wherever it happened to be.
 
-Like the adaptive deadband, this threshold is learned from an EMA and assumes there's a real gap between "normal update rhythm" and "actual silence" to detect. If a source already publishes near Home Assistant's practical ceiling (~1 reading/second) with a short `tau`, that learned threshold can end up quite tight, and the mechanism may occasionally trigger on ordinary timing jitter rather than a real silence. This is a much narrower edge case than the deadband one above — a false trigger here only starts an unnecessary injection cycle and does not, by itself, publish an incorrect value — but it's worth knowing about if you're pushing `tau` close to your source's real update interval.
+Like the adaptive deadband, this threshold is learned from an EMA and assumes there's a real gap between "normal update rhythm" and "actual silence" to detect. If a source already publishes near Home Assistant's practical ceiling (~1 reading/second) with a short `tau`, that learned threshold can end up quite tight, and the mechanism may occasionally trigger on ordinary timing jitter rather than a real silence. This is a narrow edge case — a false trigger here only starts an unnecessary injection cycle and does not, by itself, publish an incorrect value — but it's worth knowing about if you're pushing `tau` close to your source's real update interval.
 
 ---
 
@@ -169,7 +169,7 @@ The deadband threshold is estimated from the signal's own variability over time,
 
 - Suppresses insignificant updates — recorder writes divided by ~10 on typical sensors.
 - Keeps long-term statistics meaningful.
-- Designed for high-frequency sensors (power, temperature, weather...).
+- Designed for chatty sensors (power, temperature…) as well as slow ones (weather).
 - Pattern mode allows a single config line to cover dozens of sensors.
 
 ---
@@ -178,7 +178,7 @@ The deadband threshold is estimated from the signal's own variability over time,
 
 ### Home Assistant versions
 
-The 1.4 line is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older ones are not tested.
+The 1.4 line is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older Home Assistant versions are not covered by the automated tests.
 
 ### HACS (recommended)
 
@@ -379,8 +379,8 @@ lowpass_dt:
       tau: 30
       deadband: 5
 
-# Adaptive deadband, tuned to react faster to changes in variability
-# (useful on a sensor whose noise level itself varies a lot over the day)
+# Adaptive deadband, tuned to follow sooner a change in what the system usually does
+# (useful when the amplitude of its variations itself changes a lot over the day)
 lowpass_dt:
   sensors:
     - source: sensor.wind_speed_raw
@@ -464,17 +464,15 @@ This is closely related to:
 - **Zero-Order Hold (ZOH) reconstruction**, as used in sampled-data and digital control systems
 - **Causal filtering** — the filter output at time `t[n]` never depends on information only available after `t[n-1]`
 
-### Adaptive Delta Encoding for Gaussian Noise
+### Adaptive Delta Encoding: writing what is significant
 
-This filter implements a form of **adaptive delta encoding** (also known as *send-on-delta* or *level-crossing sampling*) optimized for Gaussian noise environments.
+The deadband implements a form of **adaptive delta encoding** (also known as *send-on-delta* or *level-crossing sampling*): instead of writing every filtered value, the system
 
-Instead of transmitting every sampled value, the system:
+- applies a first-order low-pass filter (which removes the noise),
+- estimates the amplitude (σ) of the filtered signal's own variations over `deadband_tau_sigma`,
+- writes only when the filtered signal moves away from the last written value by more than `k·σ`.
 
-- Applies a first-order low-pass filter
-- Dynamically estimates the variability (σ) of the filtered signal
-- Publishes only when the filtered signal deviates from the last published value by more than `k·σ`
-
-When `k = 2` and the signal is otherwise steady (so that σ reflects the noise alone), the probability that pure Gaussian noise triggers a transmission is approximately **5%**, making the encoder statistically near-optimal for suppressing noise-induced events while preserving meaningful signal variations.
+The deadband has nothing to do with the measurement's uncertainty: it sorts what is **significant** from what is not. A variation within the amplitude of what the system does all the time is not significant — writing it would fill the Recorder for little — and is written only now and then; a change of state of the system, well beyond that amplitude, is written at once. With `k = 2`, a variation of the usual amplitude crosses the threshold rarely (about 5 % of the time if those variations were Gaussian), while a change of state crosses it at once.
 
 This approach is closely related to:
 
