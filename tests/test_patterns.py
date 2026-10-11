@@ -195,3 +195,18 @@ async def test_normal_operation_logs_no_warning(hass: HomeAssistant, caplog):
     await hass.async_block_till_done()
     warnings = [r.getMessage() for r in caplog.records if r.name.startswith("custom_components.lowpass_dt") and r.levelno >= logging.WARNING]
     assert warnings == []
+
+
+async def test_explicit_chaining_allowed_a_pattern_never_chains(hass: HomeAssistant):
+    """A filtered entity named in sensors: is filtered again (wanted); a pattern matching
+    it does not filter it (most likely a mistake)."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": eid}, {"source": "sensor.lp_power_a"}], patterns=[{"match": "sensor.*"}])
+    await start(hass)
+    for t in range(3):
+        hass.states.async_set(eid, str(11 + t), ATTRS)
+        await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.lp_lp_power_a", "sensor.lp_power_a"]
+    assert hass.states.get("sensor.lp_lp_power_a").attributes["source"] == "sensor.lp_power_a"
+
