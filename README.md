@@ -230,6 +230,22 @@ No per-sensor tuning is required because parameters adapt automatically.
 
 ---
 
+### Filtering a filtered entity
+
+```yaml
+lowpass_dt:
+  sensors:
+    - source: sensor.power
+      tau: 30
+    - source: sensor.lp_power       # sensor.lp_lp_power: the filtered power, filtered again
+      tau: 600
+      name: Power (hourly trend)
+```
+
+A filtered entity can be the source of another filter, but only when it is named explicitly in `sensors:`. A pattern never filters an entity of this integration, even when its match string matches it (`sensor.*`): it would most likely be a mistake, and would chain filters endlessly (`lp_lp_lp_…`). The guard does not rely on the prefix: an entity is recognized as filtered by Home Assistant's entity registry, which records the integration that created it — with any `prefix`, an empty one included, and after its `entity_id` was renamed in Home Assistant.
+
+---
+
 ## 🔧 Fine-Tuning
 
 - Disable the deadband by setting `deadband: 0`
@@ -286,7 +302,7 @@ This means that a small variation, smaller than the deadband threshold, will sti
 | `silence` | string | — | None | Value published after convergence: `last` (default), `zero`, `unknown` |
 | `debug` | boolean | — | false | Enable verbose attributes |
 
-A match string should avoid matching already filtered entities. A prefix is added to the generated entity_id to prevent this. Recursion is automatically blocked if a misconfigured match string matches filtered entities. Creation is limited to 100 entities per match string. When a source matches several patterns, the first matching pattern in the list applies.
+A pattern never filters an entity of this integration, even if the match string matches it (see [Filtering a filtered entity](#filtering-a-filtered-entity)). Creation is limited to 100 entities per match string. When a source matches several patterns, the first matching pattern in the list applies.
 
 `min_rate_dt` and `max_rate_dt` name a *duration* (`dt`, an interval in seconds), not a *rate* — the "min"/"max" refers to the resulting publish rate they enforce, not to the duration itself. This is the same inversion as frequency vs. period: a *maximum* frequency corresponds to a *minimum* period, and vice versa. So `min_rate_dt` (the smallest allowed rate) is enforced by the *largest* interval — it's the heartbeat ceiling, firing at most this rarely. `max_rate_dt` (the largest allowed rate) is enforced by the *smallest* interval — it's the rate limiter floor, firing at most this often.
 
