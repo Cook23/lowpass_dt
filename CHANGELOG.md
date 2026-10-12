@@ -20,6 +20,12 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 - **The output stayed at the old total.** A `total_increasing` source reset during the downtime (a daily energy meter at midnight) was never recognized as a reset: every lower value was held back until the meter passed the old total again. The value read at startup is now checked like any other.
 
+### Fixed — restarts during a silence
+
+- **A source unavailable at startup was never converged to.** With no value from the source when Home Assistant started (unavailable, or not created yet), the output stayed where it was until the source spoke again — while running, the same source is held at its last value as a silence. It now is at startup too.
+- **`silence: zero` / `unknown`: the plateau's value written again at each restart.** Restarted during a silence, the entity wrote the source's last value once more before 0 or *unknown*. That the silence value is shown is now kept across a restart.
+- **The last value written twice when a silence starts already converged.** The periodic injection started even when the first injected value had already reached the source, and wrote it again.
+
 ### Fixed — an attribute source unavailable lost its unit and device class
 
 - **They went to none during the silence.** An unavailable source has no attributes: the filtered attribute's unit and device class were derived again from nothing at each injected value, and came back with the source. They are now kept.
