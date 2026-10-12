@@ -247,11 +247,19 @@ Set `tau` first — everything rests on it — then the deadband, then, if neede
 
 ### 1. `tau`: the base of everything
 
-`tau` is the time constant of the low-pass, in seconds.
+`tau` is the time constant of the low-pass, in seconds. It does not depend on how often the source reports. It is:
 
-- **Rule of thumb:** about **10 times the source's usual reporting period** — a sensor reporting every 6 s → `tau: 60`. If you know the time constant of the physical system measured (a room's temperature, a water tank), that is the natural choice.
+- **the time constant of the physical system measured**, or
+- **the time below which you consider an event not worth recording** — a kettle running for two minutes hardly matters for the month's bill.
+
+**Estimating the time constant of a system** — an example, very approximate. You come back from holidays. It is night, there is no wind and no sun: nothing unusual disturbs the house, which is at 15 °C. You set the thermostat to 20 °C. The time constant of the house is the time it takes to reach 18 °C — 63 % of the 5 °C step asked for. No need to try it: everyone knows "we'll be cold for a few hours", so `tau` is a few hours. That is enough for a sensible `tau` — and it is the same whether the thermometer reports every second or every minute.
+
+> A house's temperature is closer to an integrator of the heating power than to a first order: seeing it as a first order over a step of a few degrees is a rough approximation, but good enough to choose `tau`.
+
+**The source's period** — the filter works properly when `tau` is at least about **10 times the source's usual reporting period**: it then has enough values to average. A source reporting every minute fits a `tau` of a few hours easily; with a `tau` of 30 s, a source should report every few seconds.
+
 - **To tune it, look at the filtering alone.** Disable the deadband (`deadband: 0`), plot the source and the filtered output together over a day or two, and adjust `tau` until the filtered curve keeps the real variations and drops the noise. Then go on to the deadband.
-- **If the source slows down** beyond `tau` for a while, nothing breaks: the output stays within the source's range, without overshoot, and reaches the source's value. It just no longer filters anything useful.
+- **If the source slows down** beyond `tau` for a while (or always reports less often than that), nothing breaks: the output stays within the source's range, without overshoot, and reaches the source's value. It just no longer filters anything useful.
 - `tau` also sets the default of `deadband_tau_sigma` (100 × `tau`) and the time constant of the integral correction (below).
 
 ### 2. The deadband: what gets written
@@ -284,12 +292,13 @@ The deadband is there so as not to flood the Recorder: keep about one point in t
 The implementation uses an integral deadband formula:
 
 ```
-e = y - y_last_published
-i = (e * dt) / tau
-Publish if |e| >= D OR |i| >= D
+e  = y − y_last_published          (deviation from the last written value)
+Δt = time since the last written value
+i  = e × Δt / tau
+Publish if |e| ≥ D  or  |i| ≥ D
 ```
 
-This means that a small variation, smaller than the deadband threshold, will still be recorded if it persists long enough. The time constant of this integral action is the same as the main low-pass filter `tau`.
+A deviation smaller than the deadband `D` is still written if it lasts: the longer it lasts, the larger `i`. Half the deadband is written after 2 × `tau`, a tenth after 10 × `tau`. So the published value ends up equal to the source when it holds still: no static error.
 
 ---
 
@@ -299,7 +308,7 @@ This means that a small variation, smaller than the deadband threshold, will sti
 |-----------|------|------|---------|-------------|
 | `source` | string | — | required | Source sensor entity_id |
 | `match` | string | — | required | Source sensor match string (pattern mode) |
-| `tau` | float | seconds | 60.0 | Low-pass time constant — about 10 times the source's usual reporting period (see Fine-Tuning) |
+| `tau` | float | seconds | 60.0 | Low-pass time constant: the time constant of the system measured, or the time below which an event is not worth recording — ideally at least 10 times the source's usual reporting period (see [Fine-Tuning](#-fine-tuning)) |
 | `prefix` | string | — | `lp_` | Prefix for generated entity_id |
 | `suffix` | string | — | `(Filtered)` | Suffix added to the friendly name |
 | `name` | string | — | None | Explicit friendly name (disables prefix/suffix) |
