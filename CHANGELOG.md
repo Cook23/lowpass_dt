@@ -6,6 +6,16 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
+## v1.4.2 (beta) — unreleased
+
+### Fixed — `deadband: 0` and silences
+
+- **The injection never stopped, and `silence: zero` / `unknown` never applied.** During a silence the output is driven to the last value, and once it has reached it the injection stops and the `silence` option applies. "Reached" meant "within the deadband" — never true with a deadband of 0: the injection ran for the whole silence, the plateau was never replaced by 0 or *unknown*, and no end-of-silence marker was written. The output has now reached the source once equal to it at the displayed precision (or within the deadband, when there is one).
+
+### Fixed — an invalid value in a pattern filled the log
+
+- **Reported again at each change of each source.** A pattern was built again, with its warnings, at every state change of every source it matched: an invalid `tau`, or a `name` in a pattern (where it does not apply), wrote two warnings per value of each sensor. Each pattern is now checked once, when the integration loads, and a source already filtered is skipped at once. The limit of 100 entities per pattern is reported once too.
+
 ## v1.4.1 (beta)
 
 ### Added — an attribute as the source
