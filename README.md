@@ -365,7 +365,7 @@ A pattern never filters an entity of this integration, even if the match string 
 When only one of the two is set and it conflicts with the other's default, the other follows it: `min_rate_dt: 2` alone sets `max_rate_dt` to 1, `max_rate_dt: 7200` alone sets `min_rate_dt` to 14400.
 
 `min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
-`max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached with the adaptive deadband — a warning is logged when it blocks a publish once σ has settled. With a fixed `deadband` (including `0`) it is the normal rate limiter, and blocked publishes are not logged.
+`max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached with the adaptive deadband — a publish it blocks once σ has settled is logged (at debug level). With a fixed `deadband` (including `0`) it is the normal rate limiter, and blocked publishes are not logged.
 
 `silence` controls what value is published after the filter converges during silence. Use `zero` for sensors where silence means the device is off (power, current...) and the source failed to transmit that final zero. Use `unknown` when the value during silence is genuinely indeterminate. For `total` and `total_increasing` sensors this parameter has low effect — the end-of-silence marker is omitted so HA interpolates diagonally, which correctly reflects ongoing accumulation.
 
