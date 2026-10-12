@@ -50,7 +50,8 @@ that keep them apart. What the filter is for, and why it behaves as it does, is 
    otherwise derive the entity_id from the friendly name, and a broad pattern would filter
    its own entities, endlessly (see `tests/test_entity_id.py`).
 4. **A bad option is a warning, never a failure.** It falls back to its default; the other
-   filters keep working.
+   filters keep working. It is reported once, when the integration loads: a pattern is built
+   again for each of its sources (`build_cfg(..., quiet=True)`), never with its warnings.
 5. **Logic shared with history-explorer-card stays the same on both sides** (`circular`
    values, silence detection, attribute units — [CLAUDE.md](CLAUDE.md)): a change here is
    passed on to the card.

@@ -331,8 +331,9 @@ async def test_normal_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, fr
     curve is flat over the silence (no diagonal), then rises, whatever draws it."""
     rng = random.Random(2)
     tau, t_end = 100.0, 3 * 3600.0
-    samples = [(10.0 * k, round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
-    samples += [(7200.0 + 10.0 * k, round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    # (about every 10 s: a real sensor is never exactly on time)
+    samples = [(10.0 * k + rng.uniform(-0.5, 0.5) * (k > 0), round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    samples += [(7200.0 + 10.0 * k + rng.uniform(-0.5, 0.5), round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
     stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.2}, t_end)
     s = report("normal, silence", samples, stored, tau, t_end)
     lin = [linear(stored, t) for t in range(3600 + 1200, 7200 - 10, 30)]
@@ -525,3 +526,16 @@ async def test_edge_battery_at_rest_reaches_its_value_in_each_silence(hass: Home
         assert all(12.0 <= v <= 1032 for v in after)
     if "deadband" in options:  # (every write is the exact first-order value)
         assert all(abs(v - ideal(BATTERY_REST, 5, t)) < 0.01 for t, v in stored[1:])
+
+
+# deadband: 0 — the output never gets within a deadband of 0: it has reached the source
+# once equal to it at the displayed precision, and the silence ends as with a deadband
+# (up to 1.4.1, the injection ran for the whole silence and `silence: zero` never applied).
+@pytest.mark.parametrize(("silence", "plateau"), [(None, 50.0), ("zero", 0.0)])
+async def test_deadband_zero_silence_converges_and_stops(hass: HomeAssistant, freezer, silence, plateau):
+    samples = [(float(t), 100.0 + (t % 2)) for t in range(0, 60, 2)] + [(60.0, 50.0)]
+    options = {"tau": 10, "deadband": 0, **({"silence": silence} if silence else {})}
+    stored = await simulate(hass, freezer, samples, options, 400)
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert stored[-1][1] == plateau
+    assert ent.injector.unsub_injection is None

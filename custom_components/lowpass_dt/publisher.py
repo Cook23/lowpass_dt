@@ -42,6 +42,8 @@ class Publisher:
         self.dt_output_m2 = None
 
         self.clamped_to_source = False
+        # silence: zero / unknown shown in place of the plateau (kept across a restart)
+        self.silence_shown = False
         self.output_just_resumed = False
         # total_increasing: the source was reset, the next lower value is accepted once
         self.reset_pending = False
@@ -60,7 +62,11 @@ class Publisher:
     # Convergence detection
     # ------------------------------------------------------------
     def _check_convergence(self, last_src, deadband):
-        return last_src is not None and abs(self._diff(self.core.y, last_src)) < deadband
+        """The output has reached the source: within the deadband, or, below the displayed
+        precision, equal to it once rounded (with `deadband: 0`, the only way it can)."""
+        decimals = self.cfg.rounding if self.cfg.rounding is not None else self.decimals
+        resolution = 0.5 * 10 ** -decimals if decimals is not None else 0.0
+        return last_src is not None and abs(self._diff(self.core.y, last_src)) < max(deadband, resolution)
 
     # ------------------------------------------------------------
     # EMA helper
@@ -205,12 +211,14 @@ class Publisher:
             inj.stop_injection()
             self.output_just_resumed = True
             self.clamped_to_source = False
+            self.silence_shown = True
         else:
             s._attr_native_value = reported
 
         # a real sample published: the silence is over
         if not injected and not force:
             self.output_just_resumed = False
+            self.silence_shown = False
 
         s._attr_extra_state_attributes = (
             self._debug_attributes(dt, dt_output, dt_output_sigma)
