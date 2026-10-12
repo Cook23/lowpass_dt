@@ -6,7 +6,7 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
-## v1.3.19 — unreleased
+## v1.3.19
 
 Bug fixes from the 1.4 line (1.4.2).
 
