@@ -36,6 +36,8 @@ class TauInjector:
 
         # Explicit silence state
         self.silent = False
+        # the output reached the last value during this silence: nothing more to inject
+        self.converged = False
 
         # Manage unload
         self._stopped = False
@@ -75,6 +77,7 @@ class TauInjector:
 
         # End of silence
         self.silent = False
+        self.converged = False
 
         # Cancel previous silence timer
         if self.unsub_silence is not None:
@@ -155,11 +158,15 @@ class TauInjector:
     def _on_silence_detected(self, _):
         self.unsub_silence = None
         self.silent = True
+        self.converged = False
+        # (the source's next value ends a silence, whether the injection ran or not)
+        self.source_just_resumed = True
 
         # Immediate injection
         self._inject_once()
 
-        # Start periodic injection
+        # Start periodic injection (unless that first injection already reached the value:
+        # the next one would publish it again)
         self._start_periodic_injection()
 
     # ------------------------------------------------------------
@@ -183,7 +190,7 @@ class TauInjector:
     # Start periodic injection
     # ------------------------------------------------------------
     def _start_periodic_injection(self):
-        if self._stopped or not self.silent:
+        if self._stopped or not self.silent or self.converged:
             return
         self.unsub_injection = async_track_time_interval(
             self.hass,
@@ -195,6 +202,7 @@ class TauInjector:
     # Stop periodic injection
     # ------------------------------------------------------------
     def stop_injection(self):
+        self.converged = self.silent
         if self.unsub_injection is not None:
             self.unsub_injection()
             self.unsub_injection = None

@@ -42,6 +42,8 @@ class Publisher:
         self.dt_output_m2 = None
 
         self.clamped_to_source = False
+        # silence: zero / unknown shown in place of the plateau (kept across a restart)
+        self.silence_shown = False
         self.output_just_resumed = False
 
         self.decimals = None
@@ -316,7 +318,7 @@ class Publisher:
                 self.sensor._reset_pending = False
 
             else:
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "total_increasing monotonicity break BLOCKED for %s: %.6f → %.6f",
                     s.entity_id,
                     prev,
@@ -338,6 +340,7 @@ class Publisher:
             inj.stop_injection()
             self.output_just_resumed = True
             self.clamped_to_source = False
+            self.silence_shown = True
         else:
             s._attr_native_value = reported
 
@@ -348,6 +351,7 @@ class Publisher:
 
         if not injected and not force:
             self.output_just_resumed = False
+            self.silence_shown = False
 
         # ------------------------------------------------------------
         # 13. Attributes

@@ -223,6 +223,9 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expec
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 1500, step=5)
     assert hass.states.get(OUT).state == expected
+    # (saved, so that a restart keeps showing it)
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert ent.extra_restore_state_data.as_dict()["low_pass"]["silence_shown"] is True
 
 
 async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
@@ -375,6 +378,65 @@ async def test_total_increasing_reset_while_stopped(hass: HomeAssistant, clock):
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
     await feed(hass, clock, [(10 * k, 2 + 0.1 * k) for k in range(1, 30)], attrs=attrs)
     assert float(hass.states.get(OUT).state) < 10
+
+
+def restore_filter(hass, state, y, x_prev, attrs=ATTRS):
+    """The entity as saved by a previous run: its state and its filter state."""
+    t = dt_util.utcnow().timestamp()
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, state, attrs),
+                {
+                    "low_pass": {"y": y, "t_prev": t - 600, "x_prev": x_prev, "time_last_pub": t - 600, "circular": None},
+                    "ema_source": {"src_mean": y, "src_var": 0.0, "t_sigma_start": t - 7200},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 600},
+                    "ema_dt_output": {"dt_output_mean": 60.0, "dt_output_m2": 3600.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize(("mode", "state"), [("zero", "0.0"), ("unknown", "unknown")])
+async def test_silence_value_kept_across_a_restart(hass: HomeAssistant, clock, registered, mode, state):
+    """silence: zero / unknown shown before a restart, the source still silent on the same
+    value: nothing is written again (the plateau's value was written back, then 0 / unknown
+    again, at each restart). Saved before this field existed: told from the saved state."""
+    restore_filter(hass, state, 1500.0, 1500.0)
+    hass.states.async_set(SRC, "1500", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "silence": mode}])
+    writes = recorded(hass, OUT)
+    await clock.run_until(1, 300, step=1)
+    assert writes == []
+    assert hass.states.get(OUT).state == state
+
+
+async def test_source_unavailable_at_startup_converges_to_its_last_value(hass: HomeAssistant, clock, registered):
+    """A source unavailable when Home Assistant starts is treated as silent at its last known
+    value, as when it goes unavailable while running (the output stayed where it was)."""
+    restore_filter(hass, "500.0", 500.0, 1500.0)
+    hass.states.async_set(SRC, "unavailable", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await clock.run_until(1, 1000, step=5)
+    assert float(hass.states.get(OUT).state) == pytest.approx(1500.0, abs=0.5)
+
+
+async def test_total_increasing_small_drop_is_not_a_warning_flood(hass: HomeAssistant, clock, caplog):
+    """A total_increasing source dropping by less than half (not a reset) is held at its
+    total; each blocked value was a warning (thousands a day), it is now at debug level."""
+    import logging
+
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "1000", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await feed(hass, clock, [(tick(t) * 10, 1000 + 0.1 * t) for t in range(1, 10)], attrs=attrs)
+    caplog.clear()
+    await feed(hass, clock, [(tick(t) * 10, 990 + 0.01 * t) for t in range(10, 60)], attrs=attrs)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [w for w in warnings if "BLOCKED" in w] == []
+    assert float(hass.states.get(OUT).state) >= 1000
 
 
 # ------------------------------------------------------------------ circular
