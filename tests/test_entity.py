@@ -52,6 +52,12 @@ def registered(hass):
     er.async_get(hass).async_get_or_create("sensor", "lowpass_dt", "lowpass_dt::lp_src", suggested_object_id="lp_src")
 
 
+def tick(t):
+    """A real sensor never reports exactly on time: a perfectly regular clock (σ = 0) would
+    make each value a few hundredths of a second late a silence."""
+    return t + (0.2 if t % 2 else -0.2)
+
+
 def jitter(t):
     """A real sensor never repeats exactly: Home Assistant drops a state equal to the
     previous one (no state_changed event), which lowpass_dt would take for a silence."""
@@ -150,8 +156,11 @@ async def test_filter_follows_a_step(hass: HomeAssistant, clock):
 async def test_fixed_deadband_suppresses_small_changes(hass: HomeAssistant, clock):
     hass.states.async_set(SRC, "20", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 1.0, "max_rate_dt": 0.5}])
+    # (warm-up: a new entity learns the source's rhythm from its first intervals, and may
+    # take one of the first late values for a silence)
+    await feed(hass, clock, [(tick(t), 20 + (0.2 if t % 2 else -0.2)) for t in range(1, 20)])
     writes = recorded(hass, OUT)
-    await feed(hass, clock, [(t, 20 + (0.2 if t % 2 else -0.2)) for t in range(1, 60)])
+    await feed(hass, clock, [(tick(t), 20 + (0.2 if t % 2 else -0.2)) for t in range(20, 80)])
     assert writes == []       # noise of ±0.2 under a 1.0 deadband: nothing written
 
 
@@ -170,8 +179,9 @@ async def test_integral_term_publishes_noise_under_the_deadband(hass: HomeAssist
 async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01, "max_rate_dt": 10}])
+    await feed(hass, clock, [(tick(t), t) for t in range(1, 20)])   # (warm-up, as above)
     writes = recorded(hass, OUT)
-    await feed(hass, clock, [(t, t) for t in range(1, 61)])   # a ramp, one value per second
+    await feed(hass, clock, [(tick(t), t) for t in range(20, 80)])  # a ramp, one value per second
     assert 4 <= len(writes) <= 7                              # about one write per 10 s
 
 
@@ -213,6 +223,9 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expec
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 1500, step=5)
     assert hass.states.get(OUT).state == expected
+    # (saved, so that a restart keeps showing it)
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert ent.extra_restore_state_data.as_dict()["low_pass"]["silence_shown"] is True
 
 
 async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
@@ -310,6 +323,120 @@ async def test_sigma_start_restored_empty_is_set_again(hass: HomeAssistant, cloc
     ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
     await feed(hass, clock, [(2, 10.001)])
     assert ent.core.t_sigma_start is not None
+
+
+@pytest.mark.parametrize(("silence", "plateau"), [(None, "50.0"), ("zero", "0.0")])
+async def test_deadband_zero_silence_converges_and_stops(hass: HomeAssistant, clock, registered, silence, plateau):
+    """deadband: 0 — the output never gets within a deadband of 0: it has reached the source
+    once equal to it at the displayed precision, and the silence ends as with a deadband
+    (up to 1.3.18, the injection ran for the whole silence and `silence: zero` never applied)."""
+    hass.states.async_set(SRC, "100", ATTRS)
+    options = {"source": SRC, "tau": 10, "deadband": 0, **({"silence": silence} if silence else {})}
+    await setup_lowpass(hass, sensors=[options])
+    await feed(hass, clock, [(tick(t), 100 + jitter(t)) for t in range(1, 30)] + [(30, 50)])
+    await clock.run_until(31, 400, step=1)
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert hass.states.get(OUT).state == plateau
+    assert ent.injector.unsub_injection is None
+
+
+async def test_new_entity_interval_statistics_start_from_the_first_interval(hass: HomeAssistant, clock):
+    """A new entity starts its silence statistics from the source's first interval — they
+    used to start from tau (an hour here), which held the silence limit at tau for about
+    ninety samples."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 3600}])
+    for k in range(1, 5):
+        await clock.at(5 * k)
+        hass.states.async_set(SRC, str(10 + k + jitter(k)), ATTRS)
+        await hass.async_block_till_done()
+    inj = hass.data["entity_components"]["sensor"].get_entity(OUT).injector
+    assert inj.dt_mean == pytest.approx(5.0, abs=0.1)
+    assert inj.limit < 10
+
+
+async def test_total_increasing_reset_while_stopped(hass: HomeAssistant, clock):
+    """A daily meter reset while Home Assistant was stopped: the output follows the new
+    count (it stayed at the old total, up to 1.3.18, until the meter passed it again)."""
+    t = dt_util.utcnow().timestamp()
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, "1000.0", attrs),
+                {
+                    "low_pass": {"y": 1000.0, "t_prev": t - 600, "x_prev": 1000.0, "time_last_pub": t - 600, "circular": None},
+                    "ema_source": {"src_mean": 1000.0, "src_var": 0.0, "t_sigma_start": t - 7200},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 600},
+                    "ema_dt_output": {"dt_output_mean": 60.0, "dt_output_m2": 3600.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+    hass.states.async_set(SRC, "2", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await feed(hass, clock, [(10 * k, 2 + 0.1 * k) for k in range(1, 30)], attrs=attrs)
+    assert float(hass.states.get(OUT).state) < 10
+
+
+def restore_filter(hass, state, y, x_prev, attrs=ATTRS):
+    """The entity as saved by a previous run: its state and its filter state."""
+    t = dt_util.utcnow().timestamp()
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, state, attrs),
+                {
+                    "low_pass": {"y": y, "t_prev": t - 600, "x_prev": x_prev, "time_last_pub": t - 600, "circular": None},
+                    "ema_source": {"src_mean": y, "src_var": 0.0, "t_sigma_start": t - 7200},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 600},
+                    "ema_dt_output": {"dt_output_mean": 60.0, "dt_output_m2": 3600.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize(("mode", "state"), [("zero", "0.0"), ("unknown", "unknown")])
+async def test_silence_value_kept_across_a_restart(hass: HomeAssistant, clock, registered, mode, state):
+    """silence: zero / unknown shown before a restart, the source still silent on the same
+    value: nothing is written again (the plateau's value was written back, then 0 / unknown
+    again, at each restart). Saved before this field existed: told from the saved state."""
+    restore_filter(hass, state, 1500.0, 1500.0)
+    hass.states.async_set(SRC, "1500", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "silence": mode}])
+    writes = recorded(hass, OUT)
+    await clock.run_until(1, 300, step=1)
+    assert writes == []
+    assert hass.states.get(OUT).state == state
+
+
+async def test_source_unavailable_at_startup_converges_to_its_last_value(hass: HomeAssistant, clock, registered):
+    """A source unavailable when Home Assistant starts is treated as silent at its last known
+    value, as when it goes unavailable while running (the output stayed where it was)."""
+    restore_filter(hass, "500.0", 500.0, 1500.0)
+    hass.states.async_set(SRC, "unavailable", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await clock.run_until(1, 1000, step=5)
+    assert float(hass.states.get(OUT).state) == pytest.approx(1500.0, abs=0.5)
+
+
+async def test_total_increasing_small_drop_is_not_a_warning_flood(hass: HomeAssistant, clock, caplog):
+    """A total_increasing source dropping by less than half (not a reset) is held at its
+    total; each blocked value was a warning (thousands a day), it is now at debug level."""
+    import logging
+
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "1000", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await feed(hass, clock, [(tick(t) * 10, 1000 + 0.1 * t) for t in range(1, 10)], attrs=attrs)
+    caplog.clear()
+    await feed(hass, clock, [(tick(t) * 10, 990 + 0.01 * t) for t in range(10, 60)], attrs=attrs)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert [w for w in warnings if "BLOCKED" in w] == []
+    assert float(hass.states.get(OUT).state) >= 1000
 
 
 # ------------------------------------------------------------------ circular

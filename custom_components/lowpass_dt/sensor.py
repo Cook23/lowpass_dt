@@ -89,6 +89,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # circular: period of the restored filter state, whether the current one was
         # auto-detected, and whether the entity is running (see _resolve_auto_circular)
         self._restored_circular = None
+        self._restored_silence_shown = None
         self._circular_from_auto = False
         self._running = False
 
@@ -277,11 +278,44 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.core.y = self._last_source_value
             self._attr_native_value = self._last_source_value
 
+        # ---- total_increasing reset while Home Assistant was stopped ----
+        # (the same rule as at a sample: a strong drop is a reset — without it, every value
+        # below the restored total would be held back until the meter passes it again)
+        if (
+            self._attr_state_class == "total_increasing"
+            and self._last_source_value is not None
+            and self.core.x_prev is not None
+            and self._last_source_value < self.core.x_prev * 0.5
+        ):
+            self.core.y = self._last_source_value
+            self.core.x_prev = self._last_source_value
+            self._reset_pending = True
+
+        # ---- SOURCE WITHOUT A VALUE AT STARTUP ----
+        # (unavailable, or not created yet: its last known value is held, as during a
+        # silence while running — the output used to stay where it was, never converging)
+        startup_sample = self._last_source_value is not None
+        if not startup_sample and self.core.x_prev is not None:
+            self._last_source_value = self.core.x_prev
+
+        # ---- SILENCE VALUE SHOWN BEFORE THE RESTART ----
+        # (silence: zero / unknown, the source still at the value it fell silent on: the
+        # silence goes on — 0 or unknown again, not the plateau's value for a moment)
+        silence_shown = self._restored_silence_shown
+        if silence_shown is None and last_state is not None:
+            silence_shown = (
+                (self.cfg.silence == "unknown" and last_state.state == "unknown")
+                or (self.cfg.silence in ("zero", "0") and last_state.state in ("0", "0.0"))
+            )
+        if silence_shown and self._last_source_value == self.core.x_prev:
+            self.publisher.clamped_to_source = True
+            self.publisher.silence_shown = True
+
         # ---- HA DOWNTIME (ZOH) ----
         # The source value read at startup is a real sample: the downtime is
         # weighted on the last value known before shutdown, and the startup
         # value only takes effect from now on.
-        if self._last_source_value is not None:
+        if startup_sample:
             self.core.update_from_source(self._last_source_value, dt_util.utcnow().timestamp())
 
         # ---- SOURCE via EXTRA_STATE ----
@@ -383,6 +417,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.err_i = lp.get("err_i", 0.0)
         # (period the saved state was computed with; key absent before v1.3.17)
         self._restored_circular = lp.get("circular", _MISSING)
+        # (None: saved before 1.3.19, told from the restored state)
+        self._restored_silence_shown = lp.get("silence_shown")
 
         # EMA filtered signal
         ema = data.get("ema_source", {})
@@ -422,6 +458,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "time_last_pub": self.core.time_last_pub,
                 "err_i": self.core.err_i,
                 "circular": self.cfg.circular,
+                "silence_shown": self.publisher.silence_shown,
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,
