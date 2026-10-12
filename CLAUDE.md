@@ -15,8 +15,10 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   irregular; few writes, so as not to flood the Recorder; and a curve that looks natural
   and realistic when redrawn from the stored points, by tools the user does not control
   (straight lines or splines — hence the end-of-silence marker) as by history-explorer.
-- The user sets `tau` to about 10 times the source's usual period: that is the normal
-  regime, where all of the above must hold. When the source slows down beyond `tau`, the
+- `tau` is the time constant of the physical system measured (or the time below which an
+  event is not worth recording), never derived from the source's period. The filter works
+  properly when `tau` is at least about 10 times the source's usual period: that is the
+  normal regime, where all of the above must hold. When the source slows down beyond `tau`, the
   low-pass no longer filters anything useful, but the output must stay sound: within the
   source's range, no overshoot, reaching the source's value, no flood of writes.
 - It is home automation: what is interesting happens over tens of seconds to hours (a
