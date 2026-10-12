@@ -325,6 +325,31 @@ async def test_sigma_start_restored_empty_is_set_again(hass: HomeAssistant, cloc
     assert ent.core.t_sigma_start is not None
 
 
+async def test_total_increasing_reset_while_stopped(hass: HomeAssistant, clock):
+    """A daily meter reset while Home Assistant was stopped: the output follows the new
+    count (it stayed at the old total, up to 1.4.1, until the meter passed it again)."""
+    t = dt_util.utcnow().timestamp()
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, "1000.0", attrs),
+                {
+                    "low_pass": {"y": 1000.0, "t_prev": t - 600, "x_prev": 1000.0, "time_last_pub": t - 600, "circular": None},
+                    "ema_source": {"src_mean": 1000.0, "src_var": 0.0, "t_sigma_start": t - 7200},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 600},
+                    "ema_dt_output": {"dt_output_mean": 60.0, "dt_output_m2": 3600.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+    hass.states.async_set(SRC, "2", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await feed(hass, clock, [(10 * k, 2 + 0.1 * k) for k in range(1, 30)], attrs=attrs)
+    assert float(hass.states.get(OUT).state) < 10
+
+
 # ------------------------------------------------------------------ circular
 
 
