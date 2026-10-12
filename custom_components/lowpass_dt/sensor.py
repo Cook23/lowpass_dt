@@ -480,6 +480,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # Unit, icon, device_class and state_class follow the source's
     # ------------------------------------------------------------
     def sync_source_attributes(self, attrs) -> None:
+        if self.cfg.attribute and self.cfg.attribute not in (attrs or {}):
+            # (the source is unavailable, or lost the attribute: nothing to derive from —
+            # keep what is known, instead of a unit and device class of none)
+            self._apply_overrides()
+            return
         attrs = self._source_attributes(attrs)
 
         unit = attrs.get("unit_of_measurement")

@@ -259,3 +259,16 @@ def test_invalid_overrides_are_ignored(caplog):
     assert cfg.device_class is None and cfg.unit is None
     assert cfg.state_class == "measurement"
     assert "Invalid device_class" in caplog.text and "Invalid unit" in caplog.text
+
+
+async def test_unavailable_attribute_source_keeps_its_classes(hass: HomeAssistant):
+    """A source that becomes unavailable loses its attributes: what was derived stays (the
+    device class went to none at the next injected value, up to 1.4.1)."""
+    hass.states.async_set("weather.home", "sunny", WEATHER)
+    await setup_lowpass(hass, sensors=[{"source": "weather.home", "attribute": "temperature"}])
+    ent = hass.data["entity_components"]["sensor"].get_entity("sensor.lp_home_temperature")
+    hass.states.async_set("weather.home", "unavailable", {})
+    await hass.async_block_till_done()
+    ent.sync_source_attributes({})
+    assert ent.device_class == "temperature"
+    assert ent.native_unit_of_measurement == "°C"
