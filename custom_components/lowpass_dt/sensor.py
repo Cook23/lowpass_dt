@@ -98,6 +98,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # circular: period of the restored filter state, whether the current one was
         # auto-detected, and whether the entity is running (see _resolve_auto_circular)
         self._restored_circular = None
+        self._restored_silence_shown = False
         self._circular_from_auto = False
         self._running = False
 
@@ -333,6 +334,19 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if not startup_sample and self.core.x_prev is not None:
             self._last_source_value = self.core.x_prev
 
+        # ---- SILENCE VALUE SHOWN BEFORE THE RESTART ----
+        # (silence: zero / unknown, the source still at the value it fell silent on: the
+        # silence goes on — 0 or unknown again, not the plateau's value for a moment)
+        silence_shown = self._restored_silence_shown
+        if silence_shown is None and last_state is not None:
+            silence_shown = (
+                (self.cfg.silence == "unknown" and last_state.state == "unknown")
+                or (self.cfg.silence in ("zero", "0") and last_state.state in ("0", "0.0"))
+            )
+        if silence_shown and self._last_source_value == self.core.x_prev:
+            self.publisher.clamped_to_source = True
+            self.publisher.silence_shown = True
+
         # ---- HA DOWNTIME (ZOH) ----
         # The source value read at startup is a real sample: the downtime is
         # weighted on the last value known before shutdown, and the startup
@@ -438,6 +452,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.time_last_pub = lp.get("time_last_pub")
         # (period the saved state was computed with; key absent before v1.3.17)
         self._restored_circular = lp.get("circular", _MISSING)
+        # (None: saved before 1.4.2, told from the restored state below)
+        self._restored_silence_shown = lp.get("silence_shown")
 
         # EMA filtered signal
         ema = data.get("ema_source", {})
@@ -476,6 +492,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "x_prev": self.core.x_prev,
                 "time_last_pub": self.core.time_last_pub,
                 "circular": self.cfg.circular,
+                "silence_shown": self.publisher.silence_shown,
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,

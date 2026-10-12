@@ -226,6 +226,9 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expec
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
     await clock.run_until(111, 1500, step=5)
     assert hass.states.get(OUT).state == expected
+    # (saved, so that a restart keeps showing it)
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert ent.extra_restore_state_data.as_dict()["low_pass"]["silence_shown"] is True
 
 
 async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
@@ -367,6 +370,20 @@ def restore_filter(hass, state, y, x_prev, attrs=ATTRS):
             )
         ],
     )
+
+
+@pytest.mark.parametrize(("mode", "state"), [("zero", "0.0"), ("unknown", "unknown")])
+async def test_silence_value_kept_across_a_restart(hass: HomeAssistant, clock, registered, mode, state):
+    """silence: zero / unknown shown before a restart, the source still silent on the same
+    value: nothing is written again (the plateau's value was written back, then 0 / unknown
+    again, at each restart). Saved before this field existed: told from the saved state."""
+    restore_filter(hass, state, 1500.0, 1500.0)
+    hass.states.async_set(SRC, "1500", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "silence": mode}])
+    writes = recorded(hass, OUT)
+    await clock.run_until(1, 300, step=1)
+    assert writes == []
+    assert hass.states.get(OUT).state == state
 
 
 async def test_source_unavailable_at_startup_converges_to_its_last_value(hass: HomeAssistant, clock, registered):
