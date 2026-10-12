@@ -6,7 +6,7 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
-## v1.4.2 (beta) — unreleased
+## v1.4.2 (beta)
 
 ### Fixed — `deadband: 0` and silences
 
