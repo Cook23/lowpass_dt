@@ -12,6 +12,18 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 - **The injection never stopped, and `silence: zero` / `unknown` never applied.** During a silence the output is driven to the last value, and once it has reached it the injection stops and the `silence` option applies. "Reached" meant "within the deadband" — never true with a deadband of 0: the injection ran for the whole silence, the plateau was never replaced by 0 or *unknown*, and no end-of-silence marker was written. The output has now reached the source once equal to it at the displayed precision (or within the deadband, when there is one).
 
+### Fixed — a new entity's silence detection started late
+
+- **The first interval was taken as tau.** The first value of a new filtered entity was counted as a resumption after a silence, whose length is the silence limit — still `tau`, with no statistics yet. The source's usual interval started at `tau`: with `tau` = 1 hour and a value every 5 s, the silence limit stayed at an hour for about ninety values. The statistics now start from the first real interval.
+
+### Fixed — a meter reset while Home Assistant was stopped
+
+- **The output stayed at the old total.** A `total_increasing` source reset during the downtime (a daily energy meter at midnight) was never recognized as a reset: every lower value was held back until the meter passed the old total again. The value read at startup is now checked like any other.
+
+### Fixed — an attribute source unavailable lost its unit and device class
+
+- **They went to none during the silence.** An unavailable source has no attributes: the filtered attribute's unit and device class were derived again from nothing at each injected value, and came back with the source. They are now kept.
+
 ### Fixed — an invalid value in a pattern filled the log
 
 - **Reported again at each change of each source.** A pattern was built again, with its warnings, at every state change of every source it matched: an invalid `tau`, or a `name` in a pattern (where it does not apply), wrote two warnings per value of each sensor. Each pattern is now checked once, when the integration loads, and a source already filtered is skipped at once. The limit of 100 entities per pattern is reported once too.
