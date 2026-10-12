@@ -326,11 +326,18 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.core.x_prev = self._last_source_value
             self.publisher.reset_pending = True
 
+        # ---- SOURCE WITHOUT A VALUE AT STARTUP ----
+        # (unavailable, or not created yet: its last known value is held, as during a
+        # silence while running — the output used to stay where it was, never converging)
+        startup_sample = self._last_source_value is not None
+        if not startup_sample and self.core.x_prev is not None:
+            self._last_source_value = self.core.x_prev
+
         # ---- HA DOWNTIME (ZOH) ----
         # The source value read at startup is a real sample: the downtime is
         # weighted on the last value known before shutdown, and the startup
         # value only takes effect from now on.
-        if self._last_source_value is not None:
+        if startup_sample:
             self.core.update_from_source(self._last_source_value, dt_util.utcnow().timestamp())
 
         # ---- SOURCE via EXTRA_STATE ----

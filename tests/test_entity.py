@@ -350,6 +350,35 @@ async def test_total_increasing_reset_while_stopped(hass: HomeAssistant, clock):
     assert float(hass.states.get(OUT).state) < 10
 
 
+def restore_filter(hass, state, y, x_prev, attrs=ATTRS):
+    """The entity as saved by a previous run: its state and its filter state."""
+    t = dt_util.utcnow().timestamp()
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, state, attrs),
+                {
+                    "low_pass": {"y": y, "t_prev": t - 600, "x_prev": x_prev, "time_last_pub": t - 600, "circular": None},
+                    "ema_source": {"src_mean": y, "src_var": 0.0, "t_sigma_start": t - 7200},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 600},
+                    "ema_dt_output": {"dt_output_mean": 60.0, "dt_output_m2": 3600.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+
+
+async def test_source_unavailable_at_startup_converges_to_its_last_value(hass: HomeAssistant, clock, registered):
+    """A source unavailable when Home Assistant starts is treated as silent at its last known
+    value, as when it goes unavailable while running (the output stayed where it was)."""
+    restore_filter(hass, "500.0", 500.0, 1500.0)
+    hass.states.async_set(SRC, "unavailable", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await clock.run_until(1, 1000, step=5)
+    assert float(hass.states.get(OUT).state) == pytest.approx(1500.0, abs=0.5)
+
+
 # ------------------------------------------------------------------ circular
 
 
