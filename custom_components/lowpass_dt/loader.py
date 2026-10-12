@@ -98,6 +98,15 @@ async def async_setup_entry_loader(
     for p in patterns_list:
         _warn_unknown_keys("patterns[]", p, _ITEM_KEYS - {CONF_SOURCE})
 
+    # Each pattern checked once, its invalid values reported once: it is built again,
+    # quietly, for each of its sources — at each change of a source, on the dynamic path
+    patterns: list[tuple[dict, str]] = []
+    for p in patterns_list:
+        pat = _validate_pattern_item(p)
+        if pat:
+            build_cfg(p, source=pat, allow_unique_id=False)
+            patterns.append((p, pat))
+
     # ------------------------------------------------------------
     # Track existing lowpass entities (recursion guard)
     # ------------------------------------------------------------
@@ -117,6 +126,8 @@ async def async_setup_entry_loader(
     # Build explicit configs
     # ------------------------------------------------------------
     explicit: dict[str, LowpassCfg] = {}
+    # pattern sources already filtered
+    created_sources: set[str] = set()
 
     for item in sensors_list:
         _warn_unknown_keys("sensors[]", item, _ITEM_KEYS - {CONF_MATCH})
@@ -171,11 +182,7 @@ async def async_setup_entry_loader(
         # ------------------------------------------------------------
         # Scan sources
         # ------------------------------------------------------------
-        for p in patterns_list:
-
-            pat = _validate_pattern_item(p)
-            if not pat:
-                continue
+        for p, pat in patterns:
 
             local_count = 0
 
@@ -203,6 +210,7 @@ async def async_setup_entry_loader(
                     p,
                     source=eid,
                     allow_unique_id=False,
+                    quiet=True,
                 )
 
                 # -------- CREATE (numeric sources only) --------
@@ -217,6 +225,7 @@ async def async_setup_entry_loader(
                     break
 
                 create_cfgs[eid] = keep_cfgs[eid]
+                created_sources.add(eid)
 
         # ------------------------------------------------------------
         # Compute keep_unique_ids
@@ -289,9 +298,11 @@ async def async_setup_entry_loader(
     # ------------------------------------------------------------
 
     pattern_dynamic_created: set[str] = set()
+    limit_reported = False
 
     @callback
     def _maybe_add_new_entity(event):
+        nonlocal limit_reported
 
         if hass.state != CoreState.running:
             return
@@ -307,14 +318,11 @@ async def async_setup_entry_loader(
         if st.state in (None, "unknown", "unavailable") or not _is_measurement(st):
             return
 
-        if new_eid in explicit:
+        # (already filtered: nothing to build at each of its changes)
+        if new_eid in explicit or new_eid in created_sources:
             return
 
-        for p in patterns_list:
-
-            pat = _validate_pattern_item(p)
-            if not pat:
-                continue
+        for p, pat in patterns:
 
             if not fnmatch.fnmatch(new_eid, pat):
                 continue
@@ -322,24 +330,29 @@ async def async_setup_entry_loader(
             if _is_own(new_eid):
                 return
 
+            if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
+                if not limit_reported:
+                    _LOGGER.error("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
+                    limit_reported = True
+                return
+
             cfg = build_cfg(
                 p,
                 source=new_eid,
                 allow_unique_id=False,
+                quiet=True,
             )
 
             meta = make_meta(hass, cfg, is_pattern=True)
 
             # unique_id protection (correct concept separation)
             if meta.unique_id in desired_unique_ids:
-                return
-
-            if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
-                _LOGGER.error("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
+                created_sources.add(new_eid)
                 return
 
             desired_unique_ids.add(meta.unique_id)
             pattern_dynamic_created.add(meta.unique_id)
+            created_sources.add(new_eid)
 
             ent = sensor_cls(
                 hass,

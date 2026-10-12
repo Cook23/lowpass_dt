@@ -277,6 +277,19 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             self.core.y = self._last_source_value
             self._attr_native_value = self._last_source_value
 
+        # ---- total_increasing reset while Home Assistant was stopped ----
+        # (the same rule as at a sample: a strong drop is a reset — without it, every value
+        # below the restored total would be held back until the meter passes it again)
+        if (
+            self._attr_state_class == "total_increasing"
+            and self._last_source_value is not None
+            and self.core.x_prev is not None
+            and self._last_source_value < self.core.x_prev * 0.5
+        ):
+            self.core.y = self._last_source_value
+            self.core.x_prev = self._last_source_value
+            self._reset_pending = True
+
         # ---- HA DOWNTIME (ZOH) ----
         # The source value read at startup is a real sample: the downtime is
         # weighted on the last value known before shutdown, and the startup

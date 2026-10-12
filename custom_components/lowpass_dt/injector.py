@@ -81,8 +81,10 @@ class TauInjector:
             self.unsub_silence()
             self.unsub_silence = None
 
-        # First measurement after silence: use limit dt_silence
-        if self.source_just_resumed:
+        # First measurement after a silence (or a restart): counts as the silence limit in
+        # the interval statistics. Not on a new entity (no statistics yet, the limit is still
+        # tau): its first interval starts the statistics instead.
+        if self.source_just_resumed and self.dt_mean is not None:
             self.t_last_source = t - self.limit
 
         self._update_dt_stats(t)
