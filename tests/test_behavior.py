@@ -331,8 +331,9 @@ async def test_normal_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, fr
     curve is flat over the silence (no diagonal), then rises, whatever draws it."""
     rng = random.Random(2)
     tau, t_end = 100.0, 3 * 3600.0
-    samples = [(10.0 * k, round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
-    samples += [(7200.0 + 10.0 * k, round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    # (about every 10 s: a real sensor is never exactly on time)
+    samples = [(10.0 * k + rng.uniform(-0.5, 0.5) * (k > 0), round(30 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
+    samples += [(7200.0 + 10.0 * k + rng.uniform(-0.5, 0.5), round(50 + rng.gauss(0, 0.05), 3)) for k in range(0, 360)]
     stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.2}, t_end)
     s = report("normal, silence", samples, stored, tau, t_end)
     lin = [linear(stored, t) for t in range(3600 + 1200, 7200 - 10, 30)]

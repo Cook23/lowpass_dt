@@ -53,6 +53,12 @@ def registered(hass):
     er.async_get(hass).async_get_or_create("sensor", "lowpass_dt", "lowpass_dt::lp_src", suggested_object_id="lp_src")
 
 
+def tick(t):
+    """A real sensor never reports exactly on time: a perfectly regular clock (σ = 0) would
+    make each value a few hundredths of a second late a silence."""
+    return t + (0.2 if t % 2 else -0.2)
+
+
 def jitter(t):
     """A real sensor never repeats exactly: Home Assistant drops a state equal to the
     previous one (no state_changed event), which lowpass_dt would take for a silence."""
@@ -151,8 +157,11 @@ async def test_filter_follows_a_step(hass: HomeAssistant, clock):
 async def test_fixed_deadband_suppresses_small_changes(hass: HomeAssistant, clock):
     hass.states.async_set(SRC, "20", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 1.0, "max_rate_dt": 0.5}])
+    # (warm-up: a new entity learns the source's rhythm from its first intervals, and may
+    # take one of the first late values for a silence)
+    await feed(hass, clock, [(tick(t), 20 + (0.2 if t % 2 else -0.2)) for t in range(1, 20)])
     writes = recorded(hass, OUT)
-    await feed(hass, clock, [(t, 20 + (0.2 if t % 2 else -0.2)) for t in range(1, 60)])
+    await feed(hass, clock, [(tick(t), 20 + (0.2 if t % 2 else -0.2)) for t in range(20, 80)])
     assert writes == []       # noise of ±0.2 under a 1.0 deadband: nothing written
 
 
@@ -173,8 +182,9 @@ async def test_integral_term_publishes_noise_under_the_deadband(hass: HomeAssist
 async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 0.01, "max_rate_dt": 10}])
+    await feed(hass, clock, [(tick(t), t) for t in range(1, 20)])   # (warm-up, as above)
     writes = recorded(hass, OUT)
-    await feed(hass, clock, [(t, t) for t in range(1, 61)])   # a ramp, one value per second
+    await feed(hass, clock, [(tick(t), t) for t in range(20, 80)])  # a ramp, one value per second
     assert 4 <= len(writes) <= 7                              # about one write per 10 s
 
 
@@ -383,3 +393,18 @@ async def test_restore_keeps_full_precision_filter_state(hass: HomeAssistant, cl
     assert hass.states.get(OUT).state == "12.3"
     # downtime (5 s) weighted on the value before shutdown (12.0), not the startup value
     assert ent.core.y == pytest.approx(12.3456789 + (1 - math.exp(-5 / 60)) * (12.0 - 12.3456789), abs=1e-6)
+
+
+async def test_new_entity_interval_statistics_start_from_the_first_interval(hass: HomeAssistant, clock):
+    """A new entity starts its silence statistics from the source's first interval — they
+    used to start from tau (an hour here), which held the silence limit at tau for about
+    ninety samples."""
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 3600}])
+    for k in range(1, 5):
+        await clock.at(5 * k)
+        hass.states.async_set(SRC, str(10 + k + jitter(k)), ATTRS)
+        await hass.async_block_till_done()
+    inj = hass.data["entity_components"]["sensor"].get_entity(OUT).injector
+    assert inj.dt_mean == pytest.approx(5.0, abs=0.1)
+    assert inj.limit < 10
