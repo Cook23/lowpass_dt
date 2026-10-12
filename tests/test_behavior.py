@@ -525,3 +525,16 @@ async def test_edge_battery_at_rest_reaches_its_value_in_each_silence(hass: Home
         assert all(12.0 <= v <= 1032 for v in after)
     if "deadband" in options:  # (every write is the exact first-order value)
         assert all(abs(v - ideal(BATTERY_REST, 5, t)) < 0.01 for t, v in stored[1:])
+
+
+# deadband: 0 — the output never gets within a deadband of 0: it has reached the source
+# once equal to it at the displayed precision, and the silence ends as with a deadband
+# (up to 1.4.1, the injection ran for the whole silence and `silence: zero` never applied).
+@pytest.mark.parametrize(("silence", "plateau"), [(None, 50.0), ("zero", 0.0)])
+async def test_deadband_zero_silence_converges_and_stops(hass: HomeAssistant, freezer, silence, plateau):
+    samples = [(float(t), 100.0 + (t % 2)) for t in range(0, 60, 2)] + [(60.0, 50.0)]
+    options = {"tau": 10, "deadband": 0, **({"silence": silence} if silence else {})}
+    stored = await simulate(hass, freezer, samples, options, 400)
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert stored[-1][1] == plateau
+    assert ent.injector.unsub_injection is None

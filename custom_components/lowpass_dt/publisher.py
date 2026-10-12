@@ -60,7 +60,11 @@ class Publisher:
     # Convergence detection
     # ------------------------------------------------------------
     def _check_convergence(self, last_src, deadband):
-        return last_src is not None and abs(self._diff(self.core.y, last_src)) < deadband
+        """The output has reached the source: within the deadband, or, below the displayed
+        precision, equal to it once rounded (with `deadband: 0`, the only way it can)."""
+        decimals = self.cfg.rounding if self.cfg.rounding is not None else self.decimals
+        resolution = 0.5 * 10 ** -decimals if decimals is not None else 0.0
+        return last_src is not None and abs(self._diff(self.core.y, last_src)) < max(deadband, resolution)
 
     # ------------------------------------------------------------
     # EMA helper
