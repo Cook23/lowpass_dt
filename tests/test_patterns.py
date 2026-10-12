@@ -1,4 +1,5 @@
 """patterns: creation by entity_id pattern, cleanup, recursion guard (loader.py)."""
+import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -209,4 +210,23 @@ async def test_explicit_chaining_allowed_a_pattern_never_chains(hass: HomeAssist
         await hass.async_block_till_done()
     assert lowpass_ids(hass) == ["sensor.lp_lp_power_a", "sensor.lp_power_a"]
     assert hass.states.get("sensor.lp_lp_power_a").attributes["source"] == "sensor.lp_power_a"
+
+
+# (the silence timers of the filtered entities are still running when the test ends)
+@pytest.mark.parametrize("expected_lingering_timers", [True])
+async def test_invalid_pattern_value_reported_once(hass: HomeAssistant, caplog):
+    """An invalid value in a pattern is reported once, when the integration loads — it was
+    reported again at each change of each of its sources (up to 1.4.1)."""
+    import logging
+
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*", "name": "x", "tau": -1}])
+    assert "Invalid tau" in caplog.text and "Ignoring name" in caplog.text
+    await start(hass)
+    caplog.clear()
+    for t in range(10):
+        hass.states.async_set("sensor.power_a", str(10 + t), ATTRS)
+        hass.states.async_set("sensor.power_b", str(20 + t), ATTRS)
+        await hass.async_block_till_done()
+    assert hass.states.get("sensor.lp_power_a") is not None
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []
 

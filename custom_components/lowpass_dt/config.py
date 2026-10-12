@@ -124,27 +124,31 @@ class CfgMeta:
 # ------------------------------------------------------------
 # device_class / state_class override: a value Home Assistant knows, or 'none'
 # ------------------------------------------------------------
-def _class_override(item: dict, key: str, enum, source: str) -> str | None:
+def _class_override(item: dict, key: str, enum, source: str, warn=_LOGGER.warning) -> str | None:
     raw = item.get(key)
     if raw is None:
         return None
     value = str(raw).strip().lower()
     if value == "none" or value in {str(v) for v in enum}:
         return value
-    _LOGGER.warning("Invalid %s=%r for source=%r, ignored (expected one of Home Assistant's, or none)", key, raw, source)
+    warn("Invalid %s=%r for source=%r, ignored (expected one of Home Assistant's, or none)", key, raw, source)
     return None
 
 
 # ------------------------------------------------------------
 # Build LowpassCfg from raw config entry
 # ------------------------------------------------------------
-def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> LowpassCfg:
-    """Parse config dict into LowpassCfg."""
+def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False, quiet: bool = False) -> LowpassCfg:
+    """Parse config dict into LowpassCfg.
+
+    quiet: invalid values are logged at debug level only — a pattern's item is built again
+    for each of its sources, and checked once, with warnings, when the integration loads."""
+    warn = _LOGGER.debug if quiet else _LOGGER.warning
 
     # tau (must be > 0)
     tau = _float_or_default(item.get(CONF_TAU, 60.0), 60.0)
     if tau <= 0:
-        _LOGGER.warning("Invalid tau=%r, must be > 0, using default 60.0", tau)
+        warn("Invalid tau=%r, must be > 0, using default 60.0", tau)
         tau = 60.0
 
     # circular: absent / null / 'none' = automatic (state_class measurement_angle or a
@@ -161,7 +165,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         pass
 
     elif isinstance(raw_circular, bool):
-        _LOGGER.warning("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
+        warn("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
 
     else:
         if isinstance(raw_circular, str):
@@ -171,7 +175,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             circular = _float_or_default(raw_circular, None)
 
         if circular is None or not math.isfinite(circular) or circular <= 0:
-            _LOGGER.warning("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
+            warn("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
             circular = None
 
     # deadband (None allowed, but if provided must be >= 0)
@@ -179,13 +183,13 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     if deadband is not None:
         deadband = _float_or_default(deadband, None)
         if deadband is None or deadband < 0:
-            _LOGGER.warning("Invalid deadband=%r, disabling deadband", item.get(CONF_DEADBAND))
+            warn("Invalid deadband=%r, disabling deadband", item.get(CONF_DEADBAND))
             deadband = None
 
     # deadband_k_sigma (must be > 0)
     deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 2.0), 2.0)
     if deadband_k_sigma <= 0:
-        _LOGGER.warning("Invalid deadband_k_sigma=%r, must be > 0, using default 2.0", item.get(CONF_DEADBAND_K_SIGMA))
+        warn("Invalid deadband_k_sigma=%r, must be > 0, using default 2.0", item.get(CONF_DEADBAND_K_SIGMA))
         deadband_k_sigma = 2.0
 
     # deadband_tau_sigma (must be > 10)
@@ -198,7 +202,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         deadband_tau_sigma = _float_or_default(raw_tau_sigma, default_deadband_tau_sigma)
 
     if deadband_tau_sigma <= 0:
-        _LOGGER.warning("Invalid deadband_tau_sigma=%r, must be > 0, using derived default", item.get(CONF_DEADBAND_TAU_SIGMA))
+        warn("Invalid deadband_tau_sigma=%r, must be > 0, using derived default", item.get(CONF_DEADBAND_TAU_SIGMA))
         deadband_tau_sigma = default_deadband_tau_sigma
 
     # rounding
@@ -206,7 +210,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         try:
             rounding = int(item.get(CONF_ROUND))
         except Exception:
-            _LOGGER.warning("Invalid rounding=%r, using dynamic rounding", item.get(CONF_ROUND))
+            warn("Invalid rounding=%r, using dynamic rounding", item.get(CONF_ROUND))
             rounding = None
     else:
         rounding = None
@@ -217,11 +221,11 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     min_rate_dt = _float_or_default(item.get(CONF_MIN_RATE_DT, 3600.0), 3600.0)
 
     if max_rate_dt < 0:
-        _LOGGER.warning("Invalid max_rate_dt=%r, must be >= 0, using default 10.0", item.get(CONF_MAX_RATE_DT))
+        warn("Invalid max_rate_dt=%r, must be >= 0, using default 10.0", item.get(CONF_MAX_RATE_DT))
         max_rate_dt = 10.0
 
     if min_rate_dt < 0:
-        _LOGGER.warning("Invalid min_rate_dt=%r, must be >= 0, using default 3600.0", item.get(CONF_MIN_RATE_DT))
+        warn("Invalid min_rate_dt=%r, must be >= 0, using default 3600.0", item.get(CONF_MIN_RATE_DT))
         min_rate_dt = 3600.0
 
     # Only one of the two given, at odds with the other's default: the other follows it
@@ -233,20 +237,20 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
             min_rate_dt = max_rate_dt * 2
 
     if max_rate_dt >= min_rate_dt:
-        _LOGGER.warning("Invalid max_rate_dt=%r >= min_rate_dt=%r, publish interval must satisfy max_rate_dt < min_rate_dt, using defaults 10.0 and 3600.0", item.get(CONF_MAX_RATE_DT), item.get(CONF_MIN_RATE_DT))
+        warn("Invalid max_rate_dt=%r >= min_rate_dt=%r, publish interval must satisfy max_rate_dt < min_rate_dt, using defaults 10.0 and 3600.0", item.get(CONF_MAX_RATE_DT), item.get(CONF_MIN_RATE_DT))
         max_rate_dt = 10.0
         min_rate_dt = 3600.0
 
     # prefix
     prefix = item.get(CONF_PREFIX, "lp_")
     if not isinstance(prefix, str):
-        _LOGGER.warning("Invalid prefix=%r, must be a string, using default 'lp_'", item.get(CONF_PREFIX))
+        warn("Invalid prefix=%r, must be a string, using default 'lp_'", item.get(CONF_PREFIX))
         prefix = "lp_"
 
     # suffix
     suffix = item.get(CONF_SUFFIX, "(Filtered)")
     if not isinstance(suffix, str):
-        _LOGGER.warning("Invalid suffix=%r, must be a string, using default '(Filtered)'", item.get(CONF_SUFFIX))
+        warn("Invalid suffix=%r, must be a string, using default '(Filtered)'", item.get(CONF_SUFFIX))
         suffix = "(Filtered)"
 
     # unique_id (sensors/source only)
@@ -256,18 +260,18 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         if isinstance(raw_uid, str) and raw_uid.strip():
             unique_id = raw_uid.strip()
         else:
-            _LOGGER.warning("Invalid unique_id=%r, must be a non-empty string, ignored for source=%r.", item.get(CONF_UNIQUE_ID), source)
+            warn("Invalid unique_id=%r, must be a non-empty string, ignored for source=%r.", item.get(CONF_UNIQUE_ID), source)
 
     # incompatibilities name vs prefix/suffix
     name=item.get(CONF_NAME)
     if allow_unique_id and name:
         if CONF_PREFIX in item:
-            _LOGGER.warning("Ignoring prefix=%r because name=%r is defined for sensor %r",item.get(CONF_PREFIX), name, source)
+            warn("Ignoring prefix=%r because name=%r is defined for sensor %r",item.get(CONF_PREFIX), name, source)
         if CONF_SUFFIX in item:
-            _LOGGER.warning("Ignoring suffix=%r because name=%r is defined for sensor %r",item.get(CONF_SUFFIX), name, source)
+            warn("Ignoring suffix=%r because name=%r is defined for sensor %r",item.get(CONF_SUFFIX), name, source)
 
     elif name and not allow_unique_id:
-        _LOGGER.warning("Ignoring name=%r for pattern-based sensor %r, use explicit sensor config", name, source)
+        warn("Ignoring name=%r for pattern-based sensor %r, use explicit sensor config", name, source)
         name = None
 
     # debug mode
@@ -275,7 +279,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
     if isinstance(raw_debug, bool):
         debug = raw_debug
     else:
-        _LOGGER.warning("Invalid debug=%r, must be true/false, using default False", raw_debug)
+        warn("Invalid debug=%r, must be true/false, using default False", raw_debug)
         debug = False
 
     # silence mode
@@ -287,7 +291,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         if raw_silence in ("last", "none", "0", "zero", "unknown"):
             silence = raw_silence
         else:
-            _LOGGER.warning("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
+            warn("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
             silence = None
 
     # attribute (a non-empty string), or written after the entity_id as in
@@ -297,12 +301,12 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         if isinstance(attribute, str) and attribute.strip():
             attribute = attribute.strip()
         else:
-            _LOGGER.warning("Invalid attribute=%r, must be a non-empty string, filtering the state of %r", attribute, source)
+            warn("Invalid attribute=%r, must be a non-empty string, filtering the state of %r", attribute, source)
             attribute = None
     parts = source.split(".", 2)
     if len(parts) == 3:
         if attribute is not None and attribute != parts[2]:
-            _LOGGER.warning("source=%r names attribute %r, but attribute=%r: using %r", source, parts[2], attribute, attribute)
+            warn("source=%r names attribute %r, but attribute=%r: using %r", source, parts[2], attribute, attribute)
         source = f"{parts[0]}.{parts[1]}"
         attribute = attribute or parts[2]
 
@@ -312,11 +316,11 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False) -> Lowp
         if isinstance(unit, str) and unit.strip():
             unit = unit.strip()
         else:
-            _LOGGER.warning("Invalid unit=%r, must be a non-empty string, ignored for source=%r", unit, source)
+            warn("Invalid unit=%r, must be a non-empty string, ignored for source=%r", unit, source)
             unit = None
 
-    device_class = _class_override(item, CONF_DEVICE_CLASS, SensorDeviceClass, source)
-    state_class = _class_override(item, CONF_STATE_CLASS, SensorStateClass, source)
+    device_class = _class_override(item, CONF_DEVICE_CLASS, SensorDeviceClass, source, warn)
+    state_class = _class_override(item, CONF_STATE_CLASS, SensorStateClass, source, warn)
 
     return LowpassCfg(
         source=source,
