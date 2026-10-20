@@ -25,10 +25,48 @@ from homeassistant.components.sensor.const import (
 _NUMBER_UNIT = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?(?:[eE][-+]?\d+)?)\s*([^\d\s:.,/+-].*?)\s*$")
 
 
+# ------------------------------------------------------------
+# Attribute or sub-attribute: a path, as history-explorer-card and mini-graph-card read it
+# ------------------------------------------------------------
 def attribute_label(attribute: str) -> str:
-    """An attribute as people read it: current_temperature → Current temperature."""
-    s = attribute.replace("_", " ")
-    return s[:1].upper() + s[1:]
+    """An attribute as people read it: current_temperature → Current temperature; a
+    sub-attribute, each level so: forecast.0.temperature → Forecast › 0 › Temperature."""
+    def _one(k):
+        k = k.replace("_", " ")
+        return k[:1].upper() + k[1:]
+
+    return " › ".join(_one(k) for k in attribute.split("."))
+
+
+_MISSING = object()
+
+
+def attribute_at(attrs, path: str):
+    """The value at path in the attributes: an attribute, or a sub-attribute — the key in a
+    dictionary or the index in a list, level by level (forecast.0.temperature). An
+    attribute whose own name holds a dot is taken as is. None when there is none."""
+    if not attrs:
+        return None
+    if path in attrs:
+        return attrs[path]
+    value = attrs
+    for k in path.split("."):
+        if isinstance(value, dict):
+            value = value.get(k, _MISSING)
+        elif isinstance(value, (list, tuple)) and k.isdigit() and int(k) < len(value):
+            value = value[int(k)]
+        else:
+            return None
+        if value is _MISSING:
+            return None
+    return value
+
+
+def _leaf_name(path: str) -> str:
+    """The name a value at path goes by, for its unit, its classes and whether it is a
+    direction: its last key that is not an index (forecast.0.temperature: temperature)."""
+    keys = [k for k in path.split(".") if not k.isdigit()]
+    return keys[-1] if keys else path
 
 
 def _parse_value(raw) -> tuple[float | None, str | None]:
@@ -104,6 +142,7 @@ def _units_of(attrs: dict) -> dict[str, str]:
 
 
 def _attribute_unit(temperature_unit: str | None, domain: str, attribute: str, attrs: dict) -> str | None:
+    attribute = _leaf_name(attribute)
     if attribute.endswith("_unit"):
         return None
     units = _units_of(attrs)
@@ -123,12 +162,13 @@ def _attribute_unit(temperature_unit: str | None, domain: str, attribute: str, a
 def attribute_value(source: str, attribute: str, attrs) -> tuple[float | None, str | None]:
     """The numeric value of attribute in the source's attributes, in the unit Home Assistant
     shows it in (a light's brightness in %), and the unit the value itself gives."""
-    if not attrs or attribute not in attrs:
+    raw = attribute_at(attrs, attribute)
+    if raw is None:
         return None, None
-    value, unit = _parse_value(attrs[attribute])
+    value, unit = _parse_value(raw)
     if value is None:
         return None, None
-    d = _domain_unit(source.split(".", 1)[0], attribute)
+    d = _domain_unit(source.split(".", 1)[0], _leaf_name(attribute))
     if d and d[1] != 1.0:
         value *= d[1]
     return value, unit
@@ -200,6 +240,7 @@ _GENERIC_DEVICE_CLASSES = ("temperature", "pressure", "speed", "distance", "ener
 def derive_device_class(domain: str, attribute: str, unit: str | None) -> str | None:
     """The device_class of a filtered attribute: one its unit allows, chosen by the source's
     domain, else by the unit alone when it allows a single one, else by the attribute's name."""
+    attribute = _leaf_name(attribute)
     if domain in _NO_DEVICE_CLASS_DOMAINS:
         return None
     hint = _DOMAIN_DEVICE_CLASSES.get(domain, {}).get(attribute)
@@ -244,7 +285,7 @@ _ANGLE_NAMES = re.compile(r"bearing|direction|azimuth|heading|(^|_)yaw|wind_?dir
 
 
 def is_circular_attribute(attribute: str) -> bool:
-    return bool(_ANGLE_NAMES.search(attribute.lower()))
+    return bool(_ANGLE_NAMES.search(_leaf_name(attribute).lower()))
 
 
 # ------------------------------------------------------------

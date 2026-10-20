@@ -356,7 +356,7 @@ def source_display_name(base: str, cfg: LowpassCfg) -> str:
     return f"{base} {cfg.suffix}"
 
 
-def _slugify(text: str) -> str:
+def slugify_name(text: str) -> str:
     slug = "".join(c if c.isalnum() else "_" for c in text.lower())
     while "__" in slug:
         slug = slug.replace("__", "_")
@@ -391,7 +391,7 @@ def compute_name_and_slug(
 
         name_final = source_display_name(base, cfg)
 
-    slug = _slugify(name_final)
+    slug = slugify_name(name_final)
 
     return name_final, slug, use_name
 
