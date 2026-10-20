@@ -35,6 +35,12 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   published as is (the integral term). The adaptive deadband follows the amplitude of the
   system's own variations (σ of the filtered output, over up to `deadband_tau_sigma`).
 - `tests/test_behavior.py` checks both regimes against the exact first-order filter.
+- Decided by the user (October 2026), not to be raised again:
+  - A new entity needs some time for everything to tune itself (σ of its intervals starts at
+    0): a few false silences, and a few raw values written, at its start are expected.
+  - With `deadband: 0` and no `round`, the output keeps 2 decimals on purpose: sources often
+    have too many, and the convergence after a silence would take a ridiculously long time
+    at their full precision. `round:` is there to impose another precision.
 
 ## Versions (same rules as history-explorer-card)
 
