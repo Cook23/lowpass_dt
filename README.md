@@ -34,6 +34,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/v1.4-dev/CHANGELOG.md) for the complete, version-by-version detail.
 
+- **v1.4.3 (beta)** — Sub-attributes as the source, by their path (`forecast.0.temperature`), as history-explorer-card reads them.
 - **v1.4.1 (beta)** — An attribute as the source (`attribute:`, or `climate.salon.current_temperature`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
 - **v1.4.0 (beta)** — The exact first-order low-pass whatever the source's rhythm, the output followed between two samples (no more delay of one sample on slow sources); a test suite against a real Home Assistant.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
@@ -251,7 +252,9 @@ With `attribute`, the filter reads that attribute of the source instead of its s
 
 The value is read as [history-explorer-card](https://github.com/Cook23/history-explorer-card) reads it: a number, or a number followed by its unit (`12.5 °C`, `80 %`). Its unit is the one the value gives, else the one Home Assistant shows the attribute in: the `temperature_unit`, `wind_speed_unit`… of a weather entity, the temperature unit of Home Assistant for a thermostat's temperatures, `%` for a light's brightness (converted from 0–255) or a cover's position, and the `X_unit` attribute some integrations give (`temperature_unit` for `inside_temperature`). The device class is derived from that unit, then the source's domain, then the attribute's name (`W` is always `power`; `%` is `humidity` for `humidity`, `battery` for `battery_level`, none otherwise; nothing for a light, a cover or the sun), and the state class from the device class (`measurement` in general). An attribute in `°` is circular only if its name says so (`bearing`, `direction`, `azimuth`, `heading`): a sun's elevation is not.
 
-As in the card, the attribute can be written after the entity_id (`source: climate.salon.current_temperature`), and `unit:` always wins. `device_class:` and `state_class:` set those too (`none`: none at all); with `unit:` alone, the device class is derived from it.
+**Sub-attributes.** An attribute holding a dictionary or a list is read level by level, as history-explorer-card and mini-graph-card read it: the key in a dictionary, the index in a list — `attribute: rooms.salon.humidity`, `attribute: forecast.0.temperature`. The filtered entity is named "*Source : Rooms › Salon › Humidity (Filtered)*", `sensor.lp_<source>_rooms_salon_humidity`, and its unit, device class and whether it is an angle come from the last name that is not an index (`humidity`). An attribute whose own name holds a dot is taken as is. Only a new value at the end of the path is a sample.
+
+As in the card, the attribute can be written after the entity_id (`source: climate.salon.current_temperature`, `source: weather.home.forecast.0.temperature`), and `unit:` always wins. `device_class:` and `state_class:` set those too (`none`: none at all); with `unit:` alone, the device class is derived from it.
 
 ---
 
@@ -342,7 +345,7 @@ A deviation smaller than the deadband `D` is still written if it lasts: the long
 | `unit` | string | — | the source's | Unit of the filtered entity, instead of the source's or the one derived for an attribute |
 | `device_class` | string | — | the source's | Device class of the filtered entity (one of Home Assistant's, or `none`), instead of the source's or the one derived |
 | `state_class` | string | — | the source's | State class of the filtered entity (`measurement`, `total`…, or `none`), instead of the source's or the one derived |
-| `attribute` | string | — | None | Filter this attribute of the source instead of its state (see [Filtering an attribute](#filtering-an-attribute)). With `match`, the pattern applies to entities of every domain that have this attribute. |
+| `attribute` | string | — | None | Filter this attribute of the source instead of its state, or a sub-attribute by its path (`forecast.0.temperature`) — see [Filtering an attribute](#filtering-an-attribute). With `match`, the pattern applies to entities of every domain that have this attribute. |
 | `tau` | float | seconds | 60.0 | Low-pass time constant: the time constant of the system measured, or the time below which an event is not worth recording — ideally at least 10 times the source's usual reporting period (see [Fine-Tuning](#-fine-tuning)) |
 | `prefix` | string | — | `lp_` | Prefix for generated entity_id |
 | `suffix` | string | — | `(Filtered)` | Suffix added to the friendly name |
@@ -359,6 +362,8 @@ A deviation smaller than the deadband `D` is still written if it lasts: the long
 | `debug` | boolean | — | false | Enable verbose attributes |
 
 A pattern never filters an entity of this integration, even if the match string matches it (see [Filtering a filtered entity](#filtering-a-filtered-entity)). Creation is limited to 100 entities per match string. When a source matches several patterns, the first matching pattern in the list applies.
+
+When a source disappears, or its entry leaves the configuration, its filtered entity is not removed at once: at the first start of Home Assistant without it, the entity is kept and shown *no longer provided by the integration* — a source that is only late to start (a YAML sensor without `unique_id`) gets it back as it was, renamed `entity_id` included. It is removed at the next restart if still without a source. Reloading the integration does not count as a restart.
 
 `min_rate_dt` and `max_rate_dt` name a *duration* (`dt`, an interval in seconds), not a *rate* — the "min"/"max" refers to the resulting publish rate they enforce, not to the duration itself. This is the same inversion as frequency vs. period: a *maximum* frequency corresponds to a *minimum* period, and vice versa. So `min_rate_dt` (the smallest allowed rate) is enforced by the *largest* interval — it's the heartbeat ceiling, firing at most this rarely. `max_rate_dt` (the largest allowed rate) is enforced by the *smallest* interval — it's the rate limiter floor, firing at most this often.
 

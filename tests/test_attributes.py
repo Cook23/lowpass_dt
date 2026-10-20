@@ -272,3 +272,57 @@ async def test_unavailable_attribute_source_keeps_its_classes(hass: HomeAssistan
     ent.sync_source_attributes({})
     assert ent.device_class == "temperature"
     assert ent.native_unit_of_measurement == "°C"
+
+
+# ------------------------------------------------------------
+# Sub-attributes: a path, as history-explorer-card and mini-graph-card read it
+# ------------------------------------------------------------
+FORECAST = {
+    **WEATHER,
+    "forecast": [
+        {"condition": "sunny", "temperature": 23.5, "templow": 14, "wind_bearing": 350},
+        {"condition": "rainy", "temperature": 19.0, "templow": 12, "wind_bearing": 10},
+    ],
+    "rooms": {"salon": {"humidity": 55}, "dotted.key": 3},
+    "odd.name": 7,
+}
+
+
+def test_sub_attribute_path():
+    from custom_components.lowpass_dt.attributes import attribute_at
+
+    assert attribute_at(FORECAST, "forecast.1.temperature") == 19.0
+    assert attribute_at(FORECAST, "rooms.salon.humidity") == 55
+    assert attribute_at(FORECAST, "odd.name") == 7            # a name holding a dot, as is
+    assert attribute_at(FORECAST, "forecast.5.temperature") is None
+    assert attribute_at(FORECAST, "forecast.x.temperature") is None
+    assert attribute_at(FORECAST, "temperature.0") is None
+    assert attribute_label("forecast.0.temperature") == "Forecast › 0 › Temperature"
+
+
+def test_sub_attribute_unit_and_classes_from_its_last_name():
+    d = _derived("weather.home", "forecast.0.temperature", FORECAST)
+    assert d == {"unit_of_measurement": "°C", "device_class": "temperature", "state_class": "measurement"}
+    assert _derived("weather.home", "forecast.0.wind_bearing", FORECAST)["unit_of_measurement"] == "°"
+    assert _derived("sensor.x", "rooms.salon.humidity", {"rooms": {"salon": {"humidity": "55 %"}}})["device_class"] == "humidity"
+
+
+async def test_sub_attribute_source(hass: HomeAssistant):
+    hass.states.async_set("weather.home", "sunny", FORECAST)
+    await setup_lowpass(hass, sensors=[
+        {"source": "weather.home.forecast.0.temperature"},
+        {"source": "weather.home", "attribute": "forecast.0.wind_bearing"},
+    ])
+    st = hass.states.get("sensor.lp_home_forecast_0_temperature")
+    assert float(st.state) == pytest.approx(23.5)
+    assert st.attributes["friendly_name"] == "Home : Forecast › 0 › Temperature (Filtered)"
+    assert st.attributes["unit_of_measurement"] == "°C"
+    comp = hass.data["entity_components"]["sensor"]
+    assert comp.get_entity("sensor.lp_home_forecast_0_wind_bearing").cfg.circular == 360.0
+    ent = er.async_get(hass).async_get("sensor.lp_home_forecast_0_temperature")
+    assert ent.unique_id == "lowpass_dt::lp_weather.home.forecast.0.temperature"
+    # a new value at the end of the path is a sample; another one in the forecast is not
+    changed = {**FORECAST, "forecast": [dict(FORECAST["forecast"][0], temperature=25.0), FORECAST["forecast"][1]]}
+    hass.states.async_set("weather.home", "sunny", changed)
+    await hass.async_block_till_done()
+    assert comp.get_entity("sensor.lp_home_forecast_0_temperature")._last_source_value == 25.0

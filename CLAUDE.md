@@ -35,6 +35,12 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   published as is (the integral term). The adaptive deadband follows the amplitude of the
   system's own variations (σ of the filtered output, over up to `deadband_tau_sigma`).
 - `tests/test_behavior.py` checks both regimes against the exact first-order filter.
+- Decided by the user (October 2026), not to be raised again:
+  - A new entity needs some time for everything to tune itself (σ of its intervals starts at
+    0): a few false silences, and a few raw values written, at its start are expected.
+  - With `deadband: 0` and no `round`, the output keeps 2 decimals on purpose: sources often
+    have too many, and the convergence after a silence would take a ridiculously long time
+    at their full precision. `round:` is there to impose another precision.
 
 ## Versions (same rules as history-explorer-card)
 
@@ -135,6 +141,13 @@ Home Assistant's temperature unit for the temperature attributes, else the `X_un
 attribute of the longest X the name contains. An `X_unit` attribute has no unit.
 Both accept the attribute written after the entity_id (`climate.salon.current_temperature`:
 an entity_id has a single dot), and a `unit:` option that always wins.
+
+Sub-attributes: the attribute is a path, read level by level — the key in a dictionary, the
+index in a list (`forecast.0.temperature`); an attribute whose own name holds a dot is taken
+as is. Its unit, classes and whether it is a direction come from its last name that is not
+an index (`temperature`); its label shows each level, joined by ` › `. (here `attributes.py`
+`attribute_at`, `_leaf_name`, `attribute_label`; the card `attributeAt`, `_leafName`,
+`attributeLabel`.)
 
 Automatic `circular` for an attribute: `measurement_angle`, or a unit of `°` only when its
 name is a direction (`bearing|direction|azimuth|heading|(^|_)yaw|wind_?dir`): the sun's

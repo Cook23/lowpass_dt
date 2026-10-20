@@ -1,5 +1,9 @@
 DOMAIN = "lowpass_dt"                             # integration domain name
 
+# an entity's options in the entity registry: the run of Home Assistant that found its source
+# gone (removed at the next restart if still so)
+ABSENT_SINCE_RUN = "absent_since_run"
+
 CONF_SENSORS = "sensors"                          # list of explicit sensor configs
 CONF_SOURCE = "source"                            # source entity_id for filtering
 CONF_PATTERNS = "patterns"                        # list of pattern-based configs

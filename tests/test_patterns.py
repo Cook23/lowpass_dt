@@ -20,6 +20,15 @@ async def start(hass):
     await hass.async_block_till_done()
 
 
+async def restart(hass, run="next run"):
+    """As at a restart of Home Assistant: a new run, and the scan of a new start (the entry
+    reloaded: Home Assistant is running, the scan runs at once)."""
+    hass.data["lowpass_dt_run"] = run
+    entry = hass.config_entries.async_entries("lowpass_dt")[0]
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
 def lowpass_ids(hass):
     return sorted(e.entity_id for e in er.async_get(hass).entities.values() if e.platform == "lowpass_dt")
 
@@ -95,6 +104,11 @@ async def test_removed_explicit_entry_is_cleaned_up(hass: HomeAssistant):
     reg.async_update_entity("sensor.lp_old", config_entry_id=entry.entry_id)
     hass.set_state(CoreState.running)
     await start(hass)
+    # the first start without it: kept, "no longer provided by the integration"
+    assert "sensor.lp_old" in lowpass_ids(hass)
+    assert "sensor.lp_src" in lowpass_ids(hass)
+    # removed at the next restart
+    await restart(hass)
     assert "sensor.lp_old" not in lowpass_ids(hass)
     assert "sensor.lp_src" in lowpass_ids(hass)
 
@@ -229,4 +243,150 @@ async def test_invalid_pattern_value_reported_once(hass: HomeAssistant, caplog):
         await hass.async_block_till_done()
     assert hass.states.get("sensor.lp_power_a") is not None
     assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+async def test_source_gone_entity_kept_one_restart_then_removed(hass: HomeAssistant):
+    """A pattern source gone: its filtered entity is kept, not provided, at the first start
+    without it (a source late to start keeps it), and removed at the next restart. Reloads
+    of the integration in between do not count as restarts."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    er.async_get(hass).async_remove(eid)
+    hass.states.async_remove(eid)
+    await restart(hass, "run 2")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert er.async_get(hass).async_get("sensor.lp_power_a").options["lowpass_dt"]["absent_since_run"] == "run 2"
+    await restart(hass, "run 2")                  # a reload, not a restart
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    await restart(hass, "run 3")
+    assert lowpass_ids(hass) == []
+
+
+async def test_source_back_before_the_next_restart_keeps_its_entity(hass: HomeAssistant):
+    """The source late to start comes back: same entity (its entity_id renamed by the user
+    kept), no longer due for removal."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    er.async_get(hass).async_update_entity("sensor.lp_power_a", new_entity_id="sensor.my_power")
+    await hass.async_block_till_done()
+    er.async_get(hass).async_remove(eid)
+    hass.states.async_remove(eid)
+    await restart(hass, "run 2")
+    assert "absent_since_run" in er.async_get(hass).async_get("sensor.my_power").options["lowpass_dt"]
+    register_source(hass, "power_a")              # late, but back
+    hass.states.async_set(eid, "11", ATTRS)
+    await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.my_power"]
+    assert not er.async_get(hass).async_get("sensor.my_power").options.get("lowpass_dt")
+    await restart(hass, "run 3")
+    assert lowpass_ids(hass) == ["sensor.my_power"]
+
+
+async def test_source_back_at_the_next_restart_clears_the_mark(hass: HomeAssistant):
+    """The source back, but with no numeric value yet: not filtered again, so the entity is
+    not created again — the startup scan keeps it (its source exists) and clears its mark;
+    once the source has a value, the entity is back."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    er.async_get(hass).async_remove(eid)
+    hass.states.async_remove(eid)
+    await restart(hass, "run 2")
+    assert "absent_since_run" in er.async_get(hass).async_get("sensor.lp_power_a").options["lowpass_dt"]
+    register_source(hass, "power_a")
+    hass.states.async_set(eid, "off", ATTRS)      # back, no numeric value: not filtered yet
+    await hass.async_block_till_done()
+    assert "absent_since_run" in er.async_get(hass).async_get("sensor.lp_power_a").options["lowpass_dt"]
+    await restart(hass, "run 3")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert not er.async_get(hass).async_get("sensor.lp_power_a").options.get("lowpass_dt")
+    await restart(hass, "run 4")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    hass.states.async_set(eid, "12", ATTRS)
+    await hass.async_block_till_done()
+    st = hass.states.get("sensor.lp_power_a")      # provided again: filtering from its last value
+    assert st.state not in ("unavailable", "unknown") and not st.attributes.get("restored")
+
+
+def absent_mark(hass, entity_id):
+    return (er.async_get(hass).async_get(entity_id).options.get("lowpass_dt") or {}).get("absent_since_run")
+
+
+async def gone(hass, eid):
+    er.async_get(hass).async_remove(eid)
+    hass.states.async_remove(eid)
+    await hass.async_block_till_done()
+
+
+async def back(hass, object_id, value="10"):
+    eid = register_source(hass, object_id)
+    hass.states.async_set(eid, value, ATTRS)
+    await hass.async_block_till_done()
+
+
+async def test_removal_mark_every_case(hass: HomeAssistant):
+    """The mark's whole life: set at the first start without the source, cleared whenever
+    the source is back, set again — counted from that start — when it is gone again."""
+    await back(hass, "power_a")
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    assert absent_mark(hass, "sensor.lp_power_a") is None             # A: present, no mark
+
+    # G: gone, back exactly at the restart (present at the scan) — kept, mark cleared
+    await gone(hass, "sensor.power_a")
+    await restart(hass, "run 2")
+    assert absent_mark(hass, "sensor.lp_power_a") == "run 2"
+    await back(hass, "power_a")
+    await restart(hass, "run 3")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert absent_mark(hass, "sensor.lp_power_a") is None
+
+    # I: gone, back while running, gone again before the restart — the old mark was
+    # cleared, so this restart only marks it again, counted from now
+    await gone(hass, "sensor.power_a")
+    await restart(hass, "run 4")
+    assert absent_mark(hass, "sensor.lp_power_a") == "run 4"
+    await back(hass, "power_a", "11")
+    assert absent_mark(hass, "sensor.lp_power_a") is None
+    await gone(hass, "sensor.power_a")
+    await restart(hass, "run 5")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]                 # not removed
+    assert absent_mark(hass, "sensor.lp_power_a") == "run 5"          # H: a new mark
+
+    # D: still gone at the next restart — removed
+    await restart(hass, "run 6")
+    assert lowpass_ids(hass) == []
+
+
+async def test_explicit_sensor_without_source_is_never_marked(hass: HomeAssistant):
+    """J: an explicit sensor is wanted by the user — kept whatever its source does."""
+    await setup_lowpass(hass, sensors=[{"source": "sensor.power_a"}])
+    await start(hass)
+    for run in ("run 2", "run 3", "run 4"):
+        await restart(hass, run)
+        assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+        assert absent_mark(hass, "sensor.lp_power_a") is None
+
+
+async def test_pattern_removed_from_the_configuration(hass: HomeAssistant):
+    """L: the pattern leaves the configuration, its source still there: marked at the next
+    start, removed at the one after."""
+    from .conftest import setup_lowpass as _setup
+
+    await back(hass, "power_a")
+    await _setup(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    entry = hass.config_entries.async_entries("lowpass_dt")[0]
+    hass.config_entries.async_update_entry(entry, data={"patterns": [{"match": "sensor.other_*"}]})
+    await restart(hass, "run 2")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert absent_mark(hass, "sensor.lp_power_a") == "run 2"
+    await restart(hass, "run 3")
+    assert lowpass_ids(hass) == []
 

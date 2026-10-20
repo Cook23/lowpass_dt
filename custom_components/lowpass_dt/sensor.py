@@ -6,18 +6,21 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
 
-from .attributes import attribute_value, derived_attributes, is_circular_attribute
+from .attributes import attribute_at, attribute_value, derived_attributes, is_circular_attribute
 from .config import (
     LowpassCfg,
     CfgMeta,
     parse_state,
+    slugify_name,
     source_display_name,
 )
 
+from .const import ABSENT_SINCE_RUN, DOMAIN
 from .filter import LowpassCore
 from .injector import TauInjector
 from .publisher import Publisher
@@ -141,7 +144,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         else:
             object_id = f"{cfg.prefix}{object_id_src}"
             if cfg.attribute:
-                object_id = f"{object_id}_{cfg.attribute}"
+                # (a sub-attribute's path, forecast.0.temperature: forecast_0_temperature)
+                object_id = f"{object_id}_{slugify_name(cfg.attribute)}"
 
         self.entity_id = f"sensor.{object_id}"
         self._object_id = object_id
@@ -214,6 +218,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         # (the entity can be removed and added again, when its entity_id is changed)
         self.injector.start()
+
+        # Provided again: no longer due for removal (see loader.py, CLEANUP)
+        reg_entry = self.registry_entry
+        if reg_entry is not None and (reg_entry.options.get(DOMAIN) or {}).get(ABSENT_SINCE_RUN) is not None:
+            er.async_get(self.hass).async_update_entity_options(self.entity_id, DOMAIN, {})
 
         # ------------------------------------------------------------
         # Restore extra_data
@@ -517,7 +526,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # Unit, icon, device_class and state_class follow the source's
     # ------------------------------------------------------------
     def sync_source_attributes(self, attrs) -> None:
-        if self.cfg.attribute and self.cfg.attribute not in (attrs or {}):
+        if self.cfg.attribute and attribute_at(attrs, self.cfg.attribute) is None:
             # (the source is unavailable, or lost the attribute: nothing to derive from —
             # keep what is known, instead of a unit and device class of none)
             self._apply_overrides()
