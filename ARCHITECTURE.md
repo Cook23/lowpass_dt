@@ -30,7 +30,7 @@ that keep them apart. What the filter is for, and why it behaves as it does, is 
 | `config_flow.py` | The import step creating that entry; there is no UI configuration. |
 | `const.py` | The configuration keys — the single list of what the YAML accepts (`loader.py` warns on any other key). |
 | `config.py` | An item of the YAML turned into a `LowpassCfg` (validated, defaults, warnings), its name, entity_id and unique_id (`make_meta`), and the parsing of a source state (`parse_state`: a number, optionally followed by its unit). |
-| `loader.py` | Which entities exist: the explicit `sensors:` at once, the `patterns:` once Home Assistant has started and for every source appearing later; the cleanup of entities whose source is gone; the guard that never filters a filtered entity. |
+| `loader.py` | Which entities exist: the explicit `sensors:` at once, the `patterns:` once Home Assistant has started and for every source appearing later; the cleanup of entities whose source is gone (kept, not provided, at the first start without it; removed at the next restart — a mark in the entity registry's options); the guard that never filters a filtered entity. |
 | `sensor.py` | **The entity** (`LowpassDtSensor`): the source's events, its unit, device and state class followed, the automatic detection of angles (`circular`), the restore of the filter state across restarts, and the wiring of the three parts below. |
 | `attributes.py` | An attribute as the source: its value and unit read as history-explorer-card reads them, its device and state class derived. |
 | `filter.py` | **The math** (`LowpassCore`), no Home Assistant: the exact first order with zero-order hold, the circular mean, the σ of the output and the deadband derived from it, with its integral term. |

@@ -8,6 +8,10 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ## v1.4.3 (beta) — unreleased
 
+### Changed — a filtered entity without a source is removed at the second restart
+
+- **It was removed at the first start without its source.** A source only late to start (a YAML sensor without `unique_id`, its integration still loading) lost its filtered entity, with what was set on it (renamed `entity_id`, area, name). Now, as Home Assistant does for some entities, the first start without its source keeps it, shown *no longer provided by the integration*; it is removed at the next restart if still without a source. Reloading the integration does not count as a restart. A source back in between keeps its entity as it was.
+
 ### Added — sub-attributes
 
 - **A path as the attribute:** an attribute holding a dictionary or a list is read level by level — the key in a dictionary, the index in a list: `attribute: rooms.salon.humidity`, `attribute: forecast.0.temperature`, or written after the entity_id (`source: weather.home.forecast.0.temperature`). As history-explorer-card (1.2) and mini-graph-card read them. The unit, the device and state classes and whether it is an angle come from the last name that is not an index; the name shows each level ("*Home : Forecast › 0 › Temperature (Filtered)*"). An attribute whose own name holds a dot is taken as is.

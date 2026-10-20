@@ -362,6 +362,8 @@ A deviation smaller than the deadband `D` is still written if it lasts: the long
 
 A pattern never filters an entity of this integration, even if the match string matches it (see [Filtering a filtered entity](#filtering-a-filtered-entity)). Creation is limited to 100 entities per match string. When a source matches several patterns, the first matching pattern in the list applies.
 
+When a source disappears, or its entry leaves the configuration, its filtered entity is not removed at once: at the first start of Home Assistant without it, the entity is kept and shown *no longer provided by the integration* — a source that is only late to start (a YAML sensor without `unique_id`) gets it back as it was, renamed `entity_id` included. It is removed at the next restart if still without a source. Reloading the integration does not count as a restart.
+
 `min_rate_dt` and `max_rate_dt` name a *duration* (`dt`, an interval in seconds), not a *rate* — the "min"/"max" refers to the resulting publish rate they enforce, not to the duration itself. This is the same inversion as frequency vs. period: a *maximum* frequency corresponds to a *minimum* period, and vice versa. So `min_rate_dt` (the smallest allowed rate) is enforced by the *largest* interval — it's the heartbeat ceiling, firing at most this rarely. `max_rate_dt` (the largest allowed rate) is enforced by the *smallest* interval — it's the rate limiter floor, firing at most this often.
 
 When only one of the two is set and it conflicts with the other's default, the other follows it: `min_rate_dt: 2` alone sets `max_rate_dt` to 1, `max_rate_dt: 7200` alone sets `min_rate_dt` to 14400.
