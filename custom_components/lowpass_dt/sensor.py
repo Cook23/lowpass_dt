@@ -6,6 +6,7 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.restore_state import ExtraStoredData
 from homeassistant.util import dt as dt_util
@@ -19,6 +20,7 @@ from .config import (
     source_display_name,
 )
 
+from .const import ABSENT_SINCE_RUN, DOMAIN
 from .filter import LowpassCore
 from .injector import TauInjector
 from .publisher import Publisher
@@ -216,6 +218,11 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         # (the entity can be removed and added again, when its entity_id is changed)
         self.injector.start()
+
+        # Provided again: no longer due for removal (see loader.py, CLEANUP)
+        reg_entry = self.registry_entry
+        if reg_entry is not None and (reg_entry.options.get(DOMAIN) or {}).get(ABSENT_SINCE_RUN) is not None:
+            er.async_get(self.hass).async_update_entity_options(self.entity_id, DOMAIN, {})
 
         # ------------------------------------------------------------
         # Restore extra_data

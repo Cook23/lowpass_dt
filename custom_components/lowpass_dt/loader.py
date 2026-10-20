@@ -6,6 +6,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, CoreState
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from . import const
 from .const import (
@@ -15,6 +16,7 @@ from .const import (
     CONF_MATCH,
     CONF_ATTRIBUTE,
     DOMAIN,
+    ABSENT_SINCE_RUN,
 )
 
 from .config import (
@@ -29,6 +31,8 @@ from .config import (
 from .attributes import attribute_value
 
 _LOGGER = logging.getLogger(__name__)
+
+_RUN_KEY = f"{DOMAIN}_run"
 
 
 # ------------------------------------------------------------
@@ -101,6 +105,10 @@ async def async_setup_entry_loader(
 ) -> None:
 
     data = entry.data or {}
+
+    # This run of Home Assistant (the same across reloads of the entry, a new one at each
+    # restart): an entity without a source is removed at the restart after it was found so
+    run = hass.data.setdefault(_RUN_KEY, dt_util.utcnow().isoformat())
 
     sensors_list = data.get(CONF_SENSORS, []) or []
     patterns_list = data.get(CONF_PATTERNS, []) or []
@@ -255,8 +263,11 @@ async def async_setup_entry_loader(
             keep_unique_ids.add(meta.unique_id)
 
         # ------------------------------------------------------------
-        # CLEANUP (only if source truly gone)
+        # CLEANUP: an entity whose source is gone (or whose item left the configuration)
         # ------------------------------------------------------------
+        # The first start without it, the entity is kept, not provided: Home Assistant
+        # shows it "no longer provided by the integration". It is removed at the next
+        # restart if still without a source — a source late to start keeps its entity.
         reg = er.async_get(hass)
 
         for entity in list(reg.entities.values()):
@@ -265,8 +276,15 @@ async def async_setup_entry_loader(
             if entity.platform != DOMAIN:
                 continue
 
-            # find the source entity from unique_id
-            if entity.unique_id not in keep_unique_ids:
+            absent_since = (entity.options.get(DOMAIN) or {}).get(ABSENT_SINCE_RUN)
+            if entity.unique_id in keep_unique_ids:
+                if absent_since is not None:
+                    reg.async_update_entity_options(entity.entity_id, DOMAIN, {})
+                continue
+            if absent_since is None:
+                _LOGGER.info("cleanup: %r has no source, removed at the next restart if still so", entity.entity_id)
+                reg.async_update_entity_options(entity.entity_id, DOMAIN, {ABSENT_SINCE_RUN: run})
+            elif absent_since != run:
                 _LOGGER.info("cleanup removing entity_id=%r unique_id=%r", entity.entity_id, entity.unique_id)
                 reg.async_remove(entity.entity_id)
 
