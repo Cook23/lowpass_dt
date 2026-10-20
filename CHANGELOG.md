@@ -6,7 +6,7 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
-## v1.4.3 (beta) — unreleased
+## v1.4.3 (beta)
 
 ### Changed — a filtered entity without a source is removed at the second restart
 
