@@ -286,3 +286,30 @@ async def test_source_back_before_the_next_restart_keeps_its_entity(hass: HomeAs
     await restart(hass, "run 3")
     assert lowpass_ids(hass) == ["sensor.my_power"]
 
+
+async def test_source_back_at_the_next_restart_clears_the_mark(hass: HomeAssistant):
+    """The source back, but with no numeric value yet: not filtered again, so the entity is
+    not created again — the startup scan keeps it (its source exists) and clears its mark;
+    once the source has a value, the entity is back."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    er.async_get(hass).async_remove(eid)
+    hass.states.async_remove(eid)
+    await restart(hass, "run 2")
+    assert "absent_since_run" in er.async_get(hass).async_get("sensor.lp_power_a").options["lowpass_dt"]
+    register_source(hass, "power_a")
+    hass.states.async_set(eid, "off", ATTRS)      # back, no numeric value: not filtered yet
+    await hass.async_block_till_done()
+    assert "absent_since_run" in er.async_get(hass).async_get("sensor.lp_power_a").options["lowpass_dt"]
+    await restart(hass, "run 3")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert not er.async_get(hass).async_get("sensor.lp_power_a").options.get("lowpass_dt")
+    await restart(hass, "run 4")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    hass.states.async_set(eid, "12", ATTRS)
+    await hass.async_block_till_done()
+    st = hass.states.get("sensor.lp_power_a")      # provided again: filtering from its last value
+    assert st.state not in ("unavailable", "unknown") and not st.attributes.get("restored")
+
