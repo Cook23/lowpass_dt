@@ -6,6 +6,12 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
+## v1.4.3 (beta) — unreleased
+
+### Added — sub-attributes
+
+- **A path as the attribute:** an attribute holding a dictionary or a list is read level by level — the key in a dictionary, the index in a list: `attribute: rooms.salon.humidity`, `attribute: forecast.0.temperature`, or written after the entity_id (`source: weather.home.forecast.0.temperature`). As history-explorer-card (1.2) and mini-graph-card read them. The unit, the device and state classes and whether it is an angle come from the last name that is not an index; the name shows each level ("*Home : Forecast › 0 › Temperature (Filtered)*"). An attribute whose own name holds a dot is taken as is.
+
 ## v1.4.2 (beta)
 
 ### Fixed — `deadband: 0` and silences

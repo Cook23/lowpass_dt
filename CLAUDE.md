@@ -136,6 +136,13 @@ attribute of the longest X the name contains. An `X_unit` attribute has no unit.
 Both accept the attribute written after the entity_id (`climate.salon.current_temperature`:
 an entity_id has a single dot), and a `unit:` option that always wins.
 
+Sub-attributes: the attribute is a path, read level by level — the key in a dictionary, the
+index in a list (`forecast.0.temperature`); an attribute whose own name holds a dot is taken
+as is. Its unit, classes and whether it is a direction come from its last name that is not
+an index (`temperature`); its label shows each level, joined by ` › `. (here `attributes.py`
+`attribute_at`, `_leaf_name`, `attribute_label`; the card `attributeAt`, `_leafName`,
+`attributeLabel`.)
+
 Automatic `circular` for an attribute: `measurement_angle`, or a unit of `°` only when its
 name is a direction (`bearing|direction|azimuth|heading|(^|_)yaw|wind_?dir`): the sun's
 `elevation` is not circular. An entity's own state keeps rule 1.
