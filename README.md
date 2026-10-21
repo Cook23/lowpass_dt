@@ -8,25 +8,13 @@
 
 # Lowpass DT – Deterministic Time-Aware Filter for Home Assistant
 
-> ⚠️ **Experimental – used in real life by one person: me**, and checked by an automated test suite against a real Home Assistant.
-> Works well in my environment. May break yours. Back up Home Assistant before installing.
+> ⚠️ **Experimental – used in real life by a few beta testers**, and checked by an automated test suite against a real Home Assistant.
+> Works well in our environments. May break yours. Back up Home Assistant before installing.
 
 > [!IMPORTANT]
-> **This is version 1.4, a beta**
->
-> The **1.4** line is published as a beta (pre-release) alongside the **1.3** line, which remains the recommended version. It follows a full review of the code, and makes the integration cleaner and more reliable. What 1.4 changes today:
-> - **a new filtered entity detects silences at once** — it used to wait for the next restart of Home Assistant;
-> - **an entity_id renamed in Home Assistant is kept**, instead of being set back;
-> - **a broad pattern** such as `sensor.*` no longer filters the filtered entities themselves.
-> - **the silence injection runs in Home Assistant's event loop**, no longer in a worker thread: a silence always ends the same way;
-> - **patterns** keep the filtered entity of a source without `unique_id` across restarts, scan again after a reload of the integration, and leave out sources that are not numbers (dates, text);
-> - **fewer warnings** in the log: normal events are logged at a lower level, warnings are kept for configuration errors;
-> - **the exact first-order low-pass**, whatever the source's rhythm, and **no more delay of one sample** on slow sources (weather): a new value moves the output at once;
-> - **an attribute as the source** (a weather's wind speed, a thermostat's temperature), and `unit`, `device_class` and `state_class` to set them on any filtered entity.
->
-> **To try it**, enable *Show beta versions* for this repository in HACS and download the latest 1.4; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
->
-> *Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
+> **This is a beta (1.4)**, published alongside the 1.3 line, which stays the recommended one. To try it, enable *Show beta versions* for this repository in HACS; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
+
+*Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
 
 ---
 
