@@ -53,10 +53,12 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   without a release); the version merged — in `manifest.json` and
   the CHANGELOG — must be the last release + 1, past any dead version (`1.4.3` released → `1.4.4`). Several merges can carry
   it, until the user releases it. A released number is never carried again.
-- **A dead version.** When the user says explicitly that a version is dead (GitHub sometimes
-  fails a release), the version merged goes to the next number, and the dead one is meant never
-  to have existed: the CHANGELOG is corrected (its section takes the new number). On GitHub, a
-  dead version has a tag but no release.
+- **A dead version.** The user says when a version is dead (GitHub sometimes fails a release):
+  the version goes to the next number — in the version files, the CHANGELOG (its section takes
+  the new number), the docs if they name it — and a new merge is made; the dead one is meant
+  never to have existed. On GitHub it shows as a discrepancy: the last tag exists, its release
+  doesn't. Seeing that discrepancy without the user having said so: ask them whether that
+  version is dead, before merging.
 - **The CHANGELOG's section is the version's number** (`## v1.4.4 (beta)`), released or not — never
   `[Unreleased]`. Whether a version is released is on GitHub (its releases), not in the files.
 - **Build numbers** (`1.4.4b1`, `b2`…) only in Claude's working copy and in discussions with
