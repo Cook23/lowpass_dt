@@ -50,11 +50,11 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   `[Unreleased]`, nothing left to fix at the release.
 - **The version number is the last release's + 1.** Before each merge, check on GitHub which
   version was released last (its releases) and which versions are dead (its tags: a tag
-  without a release); the version merged — in `manifest.json` and
+  without a release); the version merged — everywhere it's written: `manifest.json` and
   the CHANGELOG — must be the last release + 1, past any dead version (`1.4.3` released → `1.4.4`). Several merges can carry
   it, until the user releases it. A released number is never carried again.
 - **A dead version.** The user says when a version is dead (GitHub sometimes fails a release):
-  the version goes to the next number — in the version files, the CHANGELOG (its section takes
+  the version goes to the next number — everywhere it's written (`manifest.json`, and any source that carries it), the CHANGELOG (its section takes
   the new number), the docs if they name it — and a new merge is made; the dead one is meant
   never to have existed. On GitHub it shows as a discrepancy: the last tag exists, its release
   doesn't. Seeing that discrepancy without the user having said so: ask them whether that
