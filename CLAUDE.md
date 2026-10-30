@@ -42,19 +42,31 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
     have too many, and the convergence after a silence would take a ridiculously long time
     at their full precision. `round:` is there to impose another precision.
 
-## Versions (same rules as history-explorer-card)
+## Versions (same rules as history-explorer-card) — set by the user, not negotiable
 
-- **Release version** `1.4.x` (`1.3.x` on `main`): set in `manifest.json`, the CHANGELOG
-  and the PR title (`1.4.x: …`) by the merge that releases it. `x` goes up by one at each
-  release, and only then. A PR that releases nothing (docs, tests) keeps the version and is
-  titled `Docs: …` / `Tests: …`. 1.4 releases are betas (GitHub pre-releases).
-- **Development build** `1.4.xbyyy` (`x` = the next release): `yyy` goes up by one at each
-  change of the code — the versioning follows the code: a commit that changes only
-  documentation (`.md` files) keeps the build number and is not a build. Used only while
-  developing and in discussions with the user, never in files: not in code comments,
-  `manifest.json`, the CHANGELOG or commit and PR titles.
+- **A release publishes the merged files as they are.** The user releases the line's branch,
+  under the version it carries; the release changes nothing in the files. So every merge must
+  be publishable as is: its version number, CHANGELOG and docs final — no build number, no
+  `[Unreleased]`, nothing left to fix at the release.
+- **The version number is the last release's + 1.** Before each merge, check on GitHub which
+  version was released last (its releases) and which versions are dead (its tags: a tag
+  without a release); the version merged — everywhere it's written: `manifest.json` and
+  the CHANGELOG — must be the last release + 1, past any dead version (`1.4.3` released → `1.4.4`). Several merges can carry
+  it, until the user releases it. A released number is never carried again.
+- **A dead version.** The user says when a version is dead (GitHub sometimes fails a release):
+  the version goes to the next number — everywhere it's written (`manifest.json`, and any source that carries it), the CHANGELOG (its section takes
+  the new number), the docs if they name it — and a new merge is made; the dead one is meant
+  never to have existed. On GitHub it shows as a discrepancy: the last tag exists, its release
+  doesn't. Seeing that discrepancy without the user having said so: ask them whether that
+  version is dead, before merging.
+- **The CHANGELOG's section is the version's number** (`## v1.4.4 (beta)`), released or not — never
+  `[Unreleased]`. Whether a version is released is on GitHub (its releases), not in the files.
+- **Build numbers** (`1.4.4b1`, `b2`…) only in Claude's working copy and in discussions with
+  the user — never merged: not in `manifest.json`, the CHANGELOG, the docs, a code comment, or a commit
+  or PR title.
   Each build is one commit, pushed to the work branch, so that builds can be compared
   (`git diff`) and undone (`git revert`); the build ↔ commit table is given to the user.
+- 1.4 releases are betas (GitHub pre-releases).
 - **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
   after each merge. Nothing is merged without the user asking.
 - **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,
