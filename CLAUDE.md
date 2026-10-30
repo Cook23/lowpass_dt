@@ -49,8 +49,9 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   be publishable as is: its version number, CHANGELOG and docs final — no build number, no
   `[Unreleased]`, nothing left to fix at the release.
 - **The version number is the last release's + 1.** Before each merge, check on GitHub which
-  version was released last (its releases, not its tags); the version merged — in `manifest.json` and
-  the CHANGELOG — must be that one + 1 (`1.4.3` released → `1.4.4`). Several merges can carry
+  version was released last (its releases) and which versions are dead (its tags: a tag
+  without a release); the version merged — in `manifest.json` and
+  the CHANGELOG — must be the last release + 1, past any dead version (`1.4.3` released → `1.4.4`). Several merges can carry
   it, until the user releases it. A released number is never carried again.
 - **A dead version.** When the user says explicitly that a version is dead (GitHub sometimes
   fails a release), the version merged goes to the next number, and the dead one is meant never
