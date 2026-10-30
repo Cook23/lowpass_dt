@@ -8,17 +8,23 @@ Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read 
 on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
 `main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
 
-## Versions (same rules as history-explorer-card)
+## Versions (same rules as history-explorer-card) — set by the user, not negotiable
 
-- **Release version** `1.4.x` (`1.3.x` on `main`): set in `manifest.json`, the CHANGELOG
-  and the PR title (`1.4.x: …`) by the merge that releases it. `x` goes up by one at each
-  release, and only then. A PR that releases nothing (docs, tests) keeps the version and is
-  titled `Docs: …` / `Tests: …`. 1.4 releases are betas (GitHub pre-releases).
-- **Development build** `1.4.xbyyy` (`x` = the next release): `yyy` goes up by one at each
-  change of the code — the versioning follows the code: a commit that changes only
-  documentation (`.md` files) keeps the build number and is not a build. Used only while
-  developing and in discussions with the user, never in files: not in code comments,
-  `manifest.json`, the CHANGELOG or commit and PR titles.
+- **A release publishes the merged files as they are.** The user releases the line's branch,
+  under the version it carries; the release changes nothing in the files. So every merge must
+  be publishable as is: its version number, CHANGELOG and docs final — no build number, no
+  `[Unreleased]`, nothing left to fix at the release.
+- **The version number is the next release's.** Right after a release, the line's number goes
+  up by one (`1.3.19` released → `1.3.20`): the first merge after it carries the new number in
+  `manifest.json`, and so does every merge until that one is released — several merges can share it.
+  A released number is never carried by a later merge. Before preparing a merge, check on
+  GitHub whether the number the branch carries is released; if it is, the merge goes up by one.
+- **The CHANGELOG's section is the version's number** (`## v1.3.20`), released or not — never
+  `[Unreleased]`. Whether a version is released is on GitHub (its releases), not in the files.
+- **Build numbers** (`1.3.20b1`, `b2`…) only in Claude's working copy and in discussions with
+  the user — never merged: not in `manifest.json`, the CHANGELOG, the docs, a code comment, or a commit
+  or PR title.
+- 1.4 releases are betas (GitHub pre-releases).
 - **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
   after each merge. Nothing is merged without the user asking.
 - **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,
