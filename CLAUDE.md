@@ -48,11 +48,14 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   under the version it carries; the release changes nothing in the files. So every merge must
   be publishable as is: its version number, CHANGELOG and docs final — no build number, no
   `[Unreleased]`, nothing left to fix at the release.
-- **The version number is the next release's.** Right after a release, the line's number goes
-  up by one (`1.4.3` released → `1.4.4`): the first merge after it carries the new number in
-  `manifest.json`, and so does every merge until that one is released — several merges can share it.
-  A released number is never carried by a later merge. Before preparing a merge, check on
-  GitHub whether the number the branch carries is released; if it is, the merge goes up by one.
+- **The version number is the last release's + 1.** Before each merge, check on GitHub which
+  version was released last (its releases, not its tags); the version merged — in `manifest.json` and
+  the CHANGELOG — must be that one + 1 (`1.4.3` released → `1.4.4`). Several merges can carry
+  it, until the user releases it. A released number is never carried again.
+- **A dead version.** When the user says explicitly that a version is dead (GitHub sometimes
+  fails a release), the version merged goes to the next number, and the dead one is meant never
+  to have existed: the CHANGELOG is corrected (its section takes the new number). On GitHub, a
+  dead version has a tag but no release.
 - **The CHANGELOG's section is the version's number** (`## v1.4.4 (beta)`), released or not — never
   `[Unreleased]`. Whether a version is released is on GitHub (its releases), not in the files.
 - **Build numbers** (`1.4.4b1`, `b2`…) only in Claude's working copy and in discussions with
