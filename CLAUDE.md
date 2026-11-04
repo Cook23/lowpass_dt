@@ -53,7 +53,7 @@ Rule set by the user: each session manages its own repository's code. A session 
 modifies the other repository's code. A code change needed on the other side is passed to
 that session (or to the user), not made from here.
 
-Card files: in 1.1 (branch `main`) both functions below are in `src/history-explorer-card.js`;
+Card files: in 1.1 (branch `v1.1-legacy`) both functions below are in `src/history-explorer-card.js`;
 in 1.2 (branch `v1.2-dev`) they are in `src/card-datasets.js`.
 
 The card's session cannot send messages to this one (its `send_message` tool is missing).
