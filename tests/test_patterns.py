@@ -421,3 +421,30 @@ async def test_source_unknown_at_restart_keeps_its_filtered_entity(hass: HomeAss
     assert absent_mark(hass, "sensor.lp_power_a") is None
     assert hass.states.get("sensor.lp_power_a").state not in ("unavailable", "unknown")
 
+
+
+async def test_pattern_limit_counts_every_creation_and_keeps_existing_entities(hass: HomeAssistant, monkeypatch, caplog):
+    """MAX_PATTERN_ENTITIES per pattern, at the start and for sources appearing later
+    alike (the later ones had a count of their own). Past the limit, the startup scan goes
+    on: an existing filtered entity whose source is there is never marked for removal."""
+    from custom_components.lowpass_dt import loader
+
+    for n in "abcde":
+        hass.states.async_set(register_source(hass, f"power_{n}"), "10", ATTRS)
+    monkeypatch.setattr(loader, "MAX_PATTERN_ENTITIES", 5)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    assert len(lowpass_ids(hass)) == 5
+
+    monkeypatch.setattr(loader, "MAX_PATTERN_ENTITIES", 3)
+    await restart(hass, "run 2")
+    await restart(hass, "run 3")
+    assert len(lowpass_ids(hass)) == 5                                 # none marked, none removed
+    assert all(absent_mark(hass, e) is None for e in lowpass_ids(hass))
+    assert "reached its limit" in caplog.text
+
+    caplog.clear()
+    hass.states.async_set("sensor.power_f", "10", ATTRS)               # appears later: over the limit
+    await hass.async_block_till_done()
+    assert "sensor.lp_power_f" not in lowpass_ids(hass)
+    assert "reached its limit" not in caplog.text                     # (reported once, at the scan)

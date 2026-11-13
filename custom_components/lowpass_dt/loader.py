@@ -184,6 +184,19 @@ async def async_setup_entry_loader(
     for ent in explicit_entities:
         own_entity_ids.add(ent.entity_id)
 
+    # Filtered entities created by each pattern (its position in the list), at the start
+    # and since: at most MAX_PATTERN_ENTITIES each, the limit reported once
+    pattern_created: dict[int, int] = {}
+    limit_reported: set[int] = set()
+
+    def _limit_reached(index: int, pat: str) -> bool:
+        if pattern_created.get(index, 0) < MAX_PATTERN_ENTITIES:
+            return False
+        if index not in limit_reported:
+            _LOGGER.warning("patterns[]: match=%r reached its limit of %d filtered entities, no more created", pat, MAX_PATTERN_ENTITIES)
+            limit_reported.add(index)
+        return True
+
     # ------------------------------------------------------------
     # Initial pattern matching (executed after HA fully started)
     # ------------------------------------------------------------
@@ -197,9 +210,9 @@ async def async_setup_entry_loader(
         # ------------------------------------------------------------
         # Scan sources
         # ------------------------------------------------------------
-        for p, pat in patterns:
+        pattern_created.clear()
+        for index, (p, pat) in enumerate(patterns):
 
-            local_count = 0
             attribute = _pattern_attribute(p)
 
             # Sources: registered sensors, and sensors with a state but no registry entry
@@ -247,11 +260,11 @@ async def async_setup_entry_loader(
                     if st is None or st.state != "unknown" or registered is None:
                         continue
 
-                local_count += 1
-
-                if local_count > MAX_PATTERN_ENTITIES:
-                    _LOGGER.warning("patterns[]: match=%r exceeded limit=%d. Aborted.", pat, MAX_PATTERN_ENTITIES)
-                    break
+                # (past the limit, the scan goes on: the sources it finds still keep their
+                # filtered entities, if any)
+                if _limit_reached(index, pat):
+                    continue
+                pattern_created[index] = pattern_created.get(index, 0) + 1
 
                 create_cfgs[key] = keep_cfgs[key]
                 created_keys.add(key)
@@ -331,12 +344,8 @@ async def async_setup_entry_loader(
     # Dynamic pattern matching
     # ------------------------------------------------------------
 
-    pattern_dynamic_created: set[str] = set()
-    limit_reported = False
-
     @callback
     def _maybe_add_new_entity(event):
-        nonlocal limit_reported
 
         if hass.state != CoreState.running:
             return
@@ -352,7 +361,7 @@ async def async_setup_entry_loader(
         # (the first pattern matching wins, for the state and for each attribute)
         seen_keys: set[str] = set()
 
-        for p, pat in patterns:
+        for index, (p, pat) in enumerate(patterns):
 
             if not fnmatch.fnmatch(new_eid, pat):
                 continue
@@ -373,11 +382,8 @@ async def async_setup_entry_loader(
             if key in explicit or key in created_keys:
                 continue
 
-            if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
-                if not limit_reported:
-                    _LOGGER.warning("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
-                    limit_reported = True
-                return
+            if _limit_reached(index, pat):
+                continue
 
             cfg = build_cfg(
                 p,
@@ -394,7 +400,7 @@ async def async_setup_entry_loader(
                 continue
 
             desired_unique_ids.add(meta.unique_id)
-            pattern_dynamic_created.add(meta.unique_id)
+            pattern_created[index] = pattern_created.get(index, 0) + 1
             created_keys.add(key)
 
             ent = sensor_cls(hass, cfg, meta)
