@@ -286,13 +286,13 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._apply_overrides()
         self._resolve_auto_circular()
 
-        if self.cfg.circular is not None and self._attr_state_class == "total_increasing":
+        if self.core.period is not None and self._attr_state_class == "total_increasing":
             _LOGGER.warning(
                 "Sensor %s configured as circular (period=%s) but state_class=total_increasing. Disabling circular mode.",
                 self.entity_id,
-                self.cfg.circular,
+                self.core.period,
             )
-            self.cfg.circular = None
+            self.core.set_period(None)
 
         # A restored filter state computed with another period (circular just turned on
         # or off — by the automatic detection after an upgrade, for instance) has a
@@ -302,8 +302,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if data:
             prev = self._restored_circular
             if prev is _MISSING:
-                prev = None if self._circular_from_auto else self.cfg.circular
-            if prev != self.cfg.circular:
+                prev = None if self._circular_from_auto else self.core.period
+            if prev != self.core.period:
                 self._reset_circular_stats(prev)
 
         # ---- DEVICE CLASS ----
@@ -522,7 +522,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "t_prev": self.core.t_prev,
                 "x_prev": self.core.x_prev,
                 "time_last_pub": self.core.time_last_pub,
-                "circular": self.cfg.circular,
+                "circular": self.core.period,
                 "silence_shown": self.publisher.silence_shown,
                 "silence_source": self.publisher.silence_source,
             },
@@ -592,7 +592,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     def _resolve_auto_circular(self) -> None:
         """An angle — state_class measurement_angle, or a unit of exactly '°' (not °C/°F) —
         is circular with a period of 360. Resolved once, as soon as it applies."""
-        if not self.cfg.circular_auto or self.cfg.circular is not None:
+        if not self.cfg.circular_auto or self.core.period is not None:
             return
         if self._attr_state_class == "total_increasing":
             return
@@ -601,8 +601,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             # (a sun's elevation, a cover's tilt: in °, but not around a circle)
             angle_unit = False
         if self._attr_state_class == "measurement_angle" or angle_unit:
-            self.cfg.circular = 360.0
-            self.cfg.circular_auto = False
+            self.core.set_period(360.0)
             self._circular_from_auto = True
             _LOGGER.info(
                 "Sensor %s detected as an angle (unit=%r, state_class=%r): circular mode, period 360",
@@ -622,8 +621,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         if self._last_source_value is not None:
             core.y = self._last_source_value
             core.x_prev = self._last_source_value
-        if core.y is not None and self.cfg.circular is not None:
-            core.y = core.y % self.cfg.circular
+        if core.y is not None and core.period is not None:
+            core.y = core.y % core.period
         core.src_mean = None
         core.src_m2 = None
         core.src_var = 0.0
@@ -633,7 +632,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             "Sensor %s: circular period changed (%s → %s), deadband statistics restarted",
             self.entity_id,
             prev_period,
-            self.cfg.circular,
+            core.period,
         )
 
     # ------------------------------------------------------------
@@ -687,7 +686,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # filter output only moves toward it at the next sample.
         deadband = self.core.effective_deadband()
         converged_before_resume = self.publisher._check_convergence(self.held_value, deadband)
-        departs_from_plateau = self._attr_native_value is not None and abs(self.publisher._diff(x, self._attr_native_value)) >= deadband
+        departs_from_plateau = self._attr_native_value is not None and abs(self.core.diff(x, self._attr_native_value)) >= deadband
         if self.injector.silent and converged_before_resume and departs_from_plateau and self._attr_state_class not in ("total", "total_increasing"):
             marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0
             self.publisher.publish(

@@ -83,7 +83,7 @@ def parse_state(state_str) -> tuple[float | None, str | None]:
     return None, None
 
 
-@dataclass
+@dataclass(frozen=True)
 class LowpassCfg:
     source: str
     tau: float
@@ -92,7 +92,8 @@ class LowpassCfg:
 
     circular: float | None
     # circular absent / null / 'none': resolved from the source once its unit and
-    # state_class are known (see LowpassSensor._resolve_auto_circular)
+    # state_class are known (see LowpassDtSensor._resolve_auto_circular; the period in
+    # effect is the core's)
     circular_auto: bool
     silence: str | None
 

@@ -53,14 +53,6 @@ class Publisher:
         self.decimals = None
 
     # ------------------------------------------------------------
-    # Difference a - b (wrapped for circular sensors)
-    # ------------------------------------------------------------
-    def _diff(self, a, b):
-        if self.cfg.circular is None:
-            return a - b
-        return ((a - b + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
-
-    # ------------------------------------------------------------
     # silence: zero shown — the device is off, the value in effect is 0
     # ------------------------------------------------------------
     def holds_zero(self):
@@ -84,7 +76,7 @@ class Publisher:
         precision, equal to it once rounded (with `deadband: 0`, the only way it can)."""
         decimals = self.cfg.rounding if self.cfg.rounding is not None else self.decimals
         resolution = 0.5 * 10 ** -decimals if decimals is not None else 0.0
-        return last_src is not None and abs(self._diff(self.core.y, last_src)) < max(deadband, resolution)
+        return last_src is not None and abs(self.core.diff(self.core.y, last_src)) < max(deadband, resolution)
 
     # ------------------------------------------------------------
     # EMA helper
@@ -136,7 +128,7 @@ class Publisher:
         # deadband + integral correction
         deadband_eff = self.core.effective_deadband()
 
-        self.core.err = self._diff(self.core.y, self.sensor._attr_native_value)
+        self.core.err = self.core.diff(self.core.y, self.sensor._attr_native_value)
 
         # Integral correction: the current error times the time since the last write, so
         # that a lasting small error (a slow drift under the deadband) is written in the
@@ -272,9 +264,10 @@ class Publisher:
         value = round(value, decimals)
 
         # A circular value stays within [0, period): 359.9996 rounds to 0, not 360
-        if self.cfg.circular is not None:
-            value = round(value % self.cfg.circular, decimals)
-            if value >= self.cfg.circular:
+        period = self.core.period
+        if period is not None:
+            value = round(value % period, decimals)
+            if value >= period:
                 value = 0.0
 
         return value, decimals

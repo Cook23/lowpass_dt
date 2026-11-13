@@ -104,10 +104,7 @@ class TauInjector:
 
         # keep following while the output is still away from the source by a deadband
         # (the rest, below the deadband, is left to the integral term and the silence)
-        diff = self.core.y - last_source_value
-        if self.cfg.circular is not None:
-            diff = ((diff + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
-        if abs(diff) >= self.core.effective_deadband():
+        if abs(self.core.diff(self.core.y, last_source_value)) >= self.core.effective_deadband():
             self.unsub_track = async_call_later(self.hass, self.track_step, self._on_track)
 
     # ------------------------------------------------------------
