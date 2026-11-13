@@ -343,6 +343,18 @@ async def test_normal_silence_is_drawn_flat_then_resumes(hass: HomeAssistant, fr
     assert sound(samples, stored)
 
 
+async def test_normal_silence_on_the_source_maximum_stays_within_its_range(hass: HomeAssistant, freezer):
+    """The source falls silent on its highest value, then resumes lower: the end-of-silence
+    marker is nudged toward the new value, so it stays within the source's range (it was
+    nudged up, past the maximum by 10^-(decimals+1))."""
+    tau, t_end = 100.0, 3 * 3600.0
+    samples = [(10.0 * k + (0.3 if k % 2 else -0.3) * (k > 0), 29.9 if k % 2 else 30.0) for k in range(0, 361)]
+    samples += [(7200.0 + 10.0 * k, 10.0 + (0.1 if k % 2 else 0.0)) for k in range(0, 360)]
+    stored = await simulate(hass, freezer, samples, {"tau": tau, "deadband": 0.2}, t_end)
+    assert any(abs(v - 30.0) < 0.01 for _, v in stored)          # the plateau, at the maximum
+    assert sound(samples, stored)
+
+
 async def test_normal_silence_resume_redrawn_by_tension_spline(hass: HomeAssistant, freezer):
     """The same, drawn by Chart.js 'tension: 0.4': where the output starts rising again, the
     spline rounds the corner; it stays within 1 (5 % of the step)."""

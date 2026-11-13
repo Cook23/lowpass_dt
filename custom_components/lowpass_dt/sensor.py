@@ -691,6 +691,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 marker_dt,
                 force=True,
                 injected=False,
+                toward=x,
             )
             _LOGGER.debug(
                 "end-of-silence marker in sensor for %s last_source_value=%f",

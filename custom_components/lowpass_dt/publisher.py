@@ -173,12 +173,12 @@ class Publisher:
     # ------------------------------------------------------------
     # MAIN PUBLISH
     # ------------------------------------------------------------
-    def publish(self, src_state, now, dt, force, injected, tracked=False):
+    def publish(self, src_state, now, dt, force, injected, tracked=False, toward=None):
         """Publish filtered value to Home Assistant.
 
-        force: end-of-silence marker (the last source value, nudged so that the Recorder
-        stores it). injected: a synthetic sample during a silence. tracked: the output
-        followed between two samples."""
+        force: end-of-silence marker (the last source value, nudged toward the new value
+        `toward` so that the Recorder stores it). injected: a synthetic sample during a
+        silence. tracked: the output followed between two samples."""
 
         s = self.sensor
         inj = self.sensor.injector
@@ -219,7 +219,7 @@ class Publisher:
         reported, decimals = self._round(reported, deadband)
 
         if force:
-            reported = self._marker_value(reported, decimals)
+            reported = self._marker_value(reported, decimals, toward)
 
         if self._breaks_monotonicity(reported):
             return
@@ -281,14 +281,18 @@ class Publisher:
     # ------------------------------------------------------------
     # End-of-silence marker value
     # ------------------------------------------------------------
-    def _marker_value(self, reported, decimals):
-        """The value shown during the silence, nudged below the displayed precision: Home
-        Assistant would not record a state equal to the current one. (With unknown shown,
-        there is no plateau to close: no marker.)"""
-        if self.silence_shown:
-            value = 10 ** (-decimals - 1)
-        else:
-            value = reported + 10 ** (-decimals - 1)
+    def _marker_value(self, reported, decimals, toward):
+        """The value shown during the silence, nudged below the displayed precision toward
+        the new value (so, within the source's range): Home Assistant would not record a
+        state equal to the current one. (With unknown shown, there is no plateau to close:
+        no marker.)"""
+        shown = 0.0 if self.silence_shown else reported
+        step = 10 ** (-decimals - 1)
+        if toward is not None and self.core.diff(toward, shown) < 0:
+            step = -step
+        value = shown + step
+        if self.core.period is not None:
+            value %= self.core.period
 
         _LOGGER.debug(
             "end-of-silence marker in publisher for %s last_source_value=%f",
