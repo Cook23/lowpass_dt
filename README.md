@@ -12,7 +12,7 @@
 > Works well in our environments. May break yours. Back up Home Assistant before installing.
 
 > [!IMPORTANT]
-> **Version 1.4 is available as a beta**, alongside this 1.3 line, which stays the recommended one. It brings the exact first-order low-pass with no delay of one sample on slow sources, attributes and sub-attributes as the source, and fewer warnings in the log. To try it, enable *Show beta versions* for this repository in HACS.
+> **Version 1.4 is the current version**; this 1.3 line is kept for fixes only. 1.4 brings the exact first-order low-pass with no delay of one sample on slow sources, attributes and sub-attributes as the source, several filters on one source, and fewer warnings in the log. HACS offers it as an update.
 
 *Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
 
@@ -20,7 +20,7 @@
 
 ## 📋 Version highlights
 
-A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/main/CHANGELOG.md) for the complete, version-by-version detail.
+A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/v1.3-legacy/CHANGELOG.md) for the complete, version-by-version detail.
 
 - **v1.3.18** — Bug fixes from the 1.4 review: new filtered entities created reliably on recent Home Assistant versions, silence injection in the event loop, `deadband_tau_sigma` effective again, safer patterns; tested on Home Assistant 2025.1 to 2026.10.
 - **v1.3.17** — Angles detected automatically: a source in `°` or with state class `measurement_angle` is filtered as circular (no more 180° averages around the north); `circular: false` turns it off.
