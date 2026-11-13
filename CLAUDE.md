@@ -41,6 +41,19 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   - With `deadband: 0` and no `round`, the output keeps 2 decimals on purpose: sources often
     have too many, and the convergence after a silence would take a ridiculously long time
     at their full precision. `round:` is there to impose another precision.
+- Decided by the user (November 2026, review of 1.4.3), not to be raised again:
+  - Two `sensors:` entries on the same source: two filters when their `name`s differ;
+    otherwise a warning, the first kept. Two entries giving the same entity from different
+    sources (`sensor.x`, `input_number.x`): a `unique_id` is required, else a warning.
+  - `silence: zero` means the device is off: the filter holds 0 and rises from 0 at the
+    resume. On a counter (`total`, `total_increasing`) `zero` shows unknown, never 0
+    (documented as is).
+  - `min_rate_dt` re-publishes the value whatever the deadband; a value equal once rounded
+    is not recorded again by Home Assistant. Kept as is, documented.
+  - For a state source, every `state_changed` is a sample, even to the same value (another
+    attribute changed, or `force_update`); for an attribute, only a new value of it. Kept.
+  - The automatic deadband never goes under 0.001 in the source's unit. Kept, documented.
+  - HACS minimum: Home Assistant 2025.1 (the oldest version tested).
 
 ## Versions (same rules as history-explorer-card) — set by the user, not negotiable
 

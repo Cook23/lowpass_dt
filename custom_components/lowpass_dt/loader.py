@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import fnmatch
 import logging
 
@@ -27,6 +28,7 @@ from .config import (
     cfg_key,
     make_meta,
     parse_state,
+    slugify_name,
 )
 from .attributes import attribute_value
 
@@ -51,11 +53,11 @@ def _warn_unknown_keys(where: str, item, allowed: set[str]) -> None:
 
 
 def _is_measurement(state, attribute: str | None = None) -> bool:
-    """A state a pattern may filter: numeric, or not known yet (unknown). For an attribute:
-    the entity has it, as a number."""
+    """A state a pattern may filter: numeric. For an attribute: the entity has it, as a
+    number."""
     if attribute:
         return attribute_value(state.entity_id, attribute, state.attributes)[0] is not None
-    return state.state == "unknown" or parse_state(state.state)[0] is not None
+    return parse_state(state.state)[0] is not None
 
 
 def _pattern_attribute(p: dict) -> str | None:
@@ -144,7 +146,13 @@ async def async_setup_entry_loader(
     # ------------------------------------------------------------
     # Build explicit configs
     # ------------------------------------------------------------
-    explicit: dict[str, LowpassCfg] = {}
+    # One filtered entity per entry. Two entries on the same source: a second filter if it
+    # has a name of its own; two entries giving the same filtered entity otherwise (the
+    # same source, or sensor.x and input_number.x): the first is kept, the other reported.
+    explicit: list[tuple[LowpassCfg, CfgMeta]] = []
+    explicit_keys: set[str] = set()                # sources filtered explicitly (LowpassCfg.key)
+    explicit_names: dict[str, set[str | None]] = {}
+    desired_unique_ids: set[str] = set()  # unique_id reference set
     # pattern sources already filtered (keys: see LowpassCfg.key)
     created_keys: set[str] = set()
 
@@ -160,29 +168,48 @@ async def async_setup_entry_loader(
             source=source,
             allow_unique_id=True,
         )
-        explicit[cfg.key] = cfg
+        meta = make_meta(hass, cfg)
+        names = explicit_names.setdefault(cfg.key, set())
+        if meta.unique_id in desired_unique_ids and cfg.unique_id is None and cfg.name and cfg.name not in names:
+            # (the same source, a name of its own: a filter of its own, identified by it)
+            cfg = dataclasses.replace(cfg, unique_id=f"{meta.unique_id_seed}.{slugify_name(cfg.name)}")
+            meta = make_meta(hass, cfg)
+        if meta.unique_id in desired_unique_ids:
+            _LOGGER.warning(
+                "sensors[]: source=%r gives the same filtered entity as an earlier entry (unique_id %r): ignored. "
+                "Give it a name of its own (the same source) or a unique_id.",
+                source,
+                meta.unique_id_seed,
+            )
+            continue
+        names.add(cfg.name)
+        explicit.append((cfg, meta))
+        explicit_keys.add(cfg.key)
+        desired_unique_ids.add(meta.unique_id)
 
     # ------------------------------------------------------------
     # Create explicit entities immediately (boot-safe)
     # ------------------------------------------------------------
 
-    explicit_meta: dict[str, CfgMeta] = {}
-    desired_unique_ids: set[str] = set()  # unique_id reference set
-
-    for cfg in explicit.values():
-        meta = make_meta(hass, cfg)
-        explicit_meta[cfg.key] = meta
-        desired_unique_ids.add(meta.unique_id)
-
-    explicit_entities = [
-        sensor_cls(hass, cfg, explicit_meta[cfg.key])
-        for cfg in explicit.values()
-    ]
+    explicit_entities = [sensor_cls(hass, cfg, meta) for cfg, meta in explicit]
 
     async_add_entities(explicit_entities)
 
     for ent in explicit_entities:
         own_entity_ids.add(ent.entity_id)
+
+    # Filtered entities created by each pattern (its position in the list), at the start
+    # and since: at most MAX_PATTERN_ENTITIES each, the limit reported once
+    pattern_created: dict[int, int] = {}
+    limit_reported: set[int] = set()
+
+    def _limit_reached(index: int, pat: str) -> bool:
+        if pattern_created.get(index, 0) < MAX_PATTERN_ENTITIES:
+            return False
+        if index not in limit_reported:
+            _LOGGER.warning("patterns[]: match=%r reached its limit of %d filtered entities, no more created", pat, MAX_PATTERN_ENTITIES)
+            limit_reported.add(index)
+        return True
 
     # ------------------------------------------------------------
     # Initial pattern matching (executed after HA fully started)
@@ -197,9 +224,9 @@ async def async_setup_entry_loader(
         # ------------------------------------------------------------
         # Scan sources
         # ------------------------------------------------------------
-        for p, pat in patterns:
+        pattern_created.clear()
+        for index, (p, pat) in enumerate(patterns):
 
-            local_count = 0
             attribute = _pattern_attribute(p)
 
             # Sources: registered sensors, and sensors with a state but no registry entry
@@ -216,7 +243,7 @@ async def async_setup_entry_loader(
             for eid in sorted(sources):
 
                 key = cfg_key(eid, attribute)
-                if key in explicit or key in keep_cfgs:
+                if key in explicit_keys or key in keep_cfgs:
                     continue
 
                 if not fnmatch.fnmatch(eid, pat):
@@ -228,23 +255,30 @@ async def async_setup_entry_loader(
                     continue
 
                 # -------- KEEP (existence only) --------
-                keep_cfgs[key] = build_cfg(
+                # (a numeric source may report a text for a while — "off" —: its filtered
+                # entity is kept)
+                cfg = build_cfg(
                     p,
                     source=eid,
                     allow_unique_id=False,
                     quiet=True,
                 )
+                keep_cfgs[key] = cfg
 
                 # -------- CREATE (numeric sources only) --------
+                # (or a source not ready yet, unknown, whose filtered entity exists: it was
+                # numeric before — a new one waits for its first number, on the dynamic path)
                 st = hass.states.get(eid)
                 if st is None or not _is_measurement(st, attribute):
+                    registered = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, make_meta(hass, cfg).unique_id)
+                    if st is None or st.state != "unknown" or registered is None:
+                        continue
+
+                # (past the limit, the scan goes on: the sources it finds still keep their
+                # filtered entities, if any)
+                if _limit_reached(index, pat):
                     continue
-
-                local_count += 1
-
-                if local_count > MAX_PATTERN_ENTITIES:
-                    _LOGGER.warning("patterns[]: match=%r exceeded limit=%d. Aborted.", pat, MAX_PATTERN_ENTITIES)
-                    break
+                pattern_created[index] = pattern_created.get(index, 0) + 1
 
                 create_cfgs[key] = keep_cfgs[key]
                 created_keys.add(key)
@@ -254,8 +288,7 @@ async def async_setup_entry_loader(
         # ------------------------------------------------------------
         keep_unique_ids: set[str] = set()
 
-        for cfg in explicit.values():
-            meta = make_meta(hass, cfg)
+        for _cfg, meta in explicit:
             keep_unique_ids.add(meta.unique_id)
 
         for cfg in keep_cfgs.values():
@@ -297,6 +330,9 @@ async def async_setup_entry_loader(
         for cfg in create_cfgs.values():
 
             meta = make_meta(hass, cfg)
+            # (already an explicit entity's: sensor.x by a pattern, input_number.x explicit)
+            if meta.unique_id in desired_unique_ids:
+                continue
             desired_unique_ids.add(meta.unique_id)
 
             ent = sensor_cls(hass, cfg, meta)
@@ -324,12 +360,8 @@ async def async_setup_entry_loader(
     # Dynamic pattern matching
     # ------------------------------------------------------------
 
-    pattern_dynamic_created: set[str] = set()
-    limit_reported = False
-
     @callback
     def _maybe_add_new_entity(event):
-        nonlocal limit_reported
 
         if hass.state != CoreState.running:
             return
@@ -345,7 +377,7 @@ async def async_setup_entry_loader(
         # (the first pattern matching wins, for the state and for each attribute)
         seen_keys: set[str] = set()
 
-        for p, pat in patterns:
+        for index, (p, pat) in enumerate(patterns):
 
             if not fnmatch.fnmatch(new_eid, pat):
                 continue
@@ -359,21 +391,15 @@ async def async_setup_entry_loader(
                 continue
             seen_keys.add(key)
 
-            if attribute:
-                if not _is_measurement(st, attribute):
-                    continue
-            elif st.state in (None, "unknown", "unavailable") or not _is_measurement(st):
+            if not _is_measurement(st, attribute):
                 continue
 
             # (already filtered: nothing to build at each of its changes)
-            if key in explicit or key in created_keys:
+            if key in explicit_keys or key in created_keys:
                 continue
 
-            if len(pattern_dynamic_created) >= MAX_PATTERN_ENTITIES:
-                if not limit_reported:
-                    _LOGGER.warning("patterns[]: dynamic creation aborted, limit=%d reached", MAX_PATTERN_ENTITIES)
-                    limit_reported = True
-                return
+            if _limit_reached(index, pat):
+                continue
 
             cfg = build_cfg(
                 p,
@@ -390,7 +416,7 @@ async def async_setup_entry_loader(
                 continue
 
             desired_unique_ids.add(meta.unique_id)
-            pattern_dynamic_created.add(meta.unique_id)
+            pattern_created[index] = pattern_created.get(index, 0) + 1
             created_keys.add(key)
 
             ent = sensor_cls(hass, cfg, meta)

@@ -52,9 +52,57 @@ def test_circular_values(raw, period, auto):
         assert c.circular == pytest.approx(period)
 
 
-@pytest.mark.parametrize("tau", [0, -1, "abc"])
-def test_invalid_tau_falls_back(tau):
-    assert cfg(tau=tau).tau == 60.0
+@pytest.mark.parametrize(
+    "key, default",
+    [
+        ("tau", 60.0),
+        ("deadband_k_sigma", 2.0),
+        ("deadband_tau_sigma", 6000.0),
+        ("max_rate_dt", 10.0),
+        ("min_rate_dt", 3600.0),
+    ],
+)
+@pytest.mark.parametrize("raw", [-1, "abc", True, math.nan, math.inf, "nan"])
+def test_invalid_number_falls_back_with_a_warning(caplog, key, default, raw):
+    """Text, a boolean, nan, inf or a value out of range: the default, and a warning (text
+    and nan used to be taken quietly, nan and inf kept as they were)."""
+    assert getattr(cfg(**{key: raw}), key) == default
+    assert f"Invalid {key}=" in caplog.text
+
+
+@pytest.mark.parametrize("key", ["tau", "deadband_k_sigma", "deadband_tau_sigma"])
+def test_zero_is_invalid_where_it_must_be_positive(caplog, key):
+    cfg(**{key: 0})
+    assert f"Invalid {key}=" in caplog.text
+
+
+def test_absent_option_is_quiet(caplog):
+    cfg()
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("raw", [-1, "abc", True, math.nan, math.inf])
+def test_invalid_deadband_is_adaptive_with_a_warning(caplog, raw):
+    assert cfg(deadband=raw).deadband is None
+    assert "Invalid deadband=" in caplog.text
+
+
+@pytest.mark.parametrize("raw, expected", [(2, 2), (2.0, 2), ("3", 3), (0, 0), (-1, -1)])
+def test_round_values(caplog, raw, expected):
+    assert cfg(round=raw).rounding == expected
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("raw", [2.7, True, "abc", math.nan])
+def test_invalid_round_is_dynamic_with_a_warning(caplog, raw):
+    assert cfg(round=raw).rounding is None
+    assert "Invalid round=" in caplog.text
+
+
+def test_unique_id_ignored_for_patterns_with_a_warning(caplog):
+    c = build_cfg({"unique_id": "x"}, source="sensor.x", allow_unique_id=False)
+    assert c.unique_id is None
+    assert "Ignoring unique_id=" in caplog.text
 
 
 def test_rates_must_be_ordered():
@@ -70,12 +118,11 @@ def test_one_rate_alone_moves_the_other_default():
     assert (c.max_rate_dt, c.min_rate_dt) == (7200.0, 14400.0)
 
 
-def test_negative_deadband_disabled():
-    assert cfg(deadband=-1).deadband is None
+def test_deadband_zero_is_valid():
     assert cfg(deadband=0).deadband == 0.0
 
 
-@pytest.mark.parametrize("raw, expected", [("Last", "last"), ("ZERO", "zero"), (0, "0"), ("unknown", "unknown"), ("bad", None)])
+@pytest.mark.parametrize("raw, expected", [("Last", "last"), ("none", "none"), ("ZERO", "zero"), (0, "0"), ("unknown", "unknown"), ("bad", None)])
 def test_silence_values(raw, expected):
     assert cfg(silence=raw).silence == expected
 
@@ -97,6 +144,7 @@ async def test_config_schema_passes_options_through(hass):
 
     conf = {"lowpass_dt": {"sensors": [{"source": "sensor.x", "tau": "abc", "tua": 1}]}, "other": {}}
     assert CONFIG_SCHEMA(conf) == conf
+    assert cfg(tau="abc").tau == 60.0       # (then build_cfg: the default, with a warning)
     assert CONFIG_SCHEMA({"lowpass_dt": None}) == {"lowpass_dt": None}
     with pytest.raises(Exception):
         CONFIG_SCHEMA({"lowpass_dt": ["not", "a", "mapping"]})

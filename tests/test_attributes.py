@@ -167,7 +167,7 @@ async def test_state_and_attributes_of_one_source(hass: HomeAssistant):
         {"source": "weather.home", "attribute": "wind_bearing"},
     ])
     comp = hass.data["entity_components"]["sensor"]
-    assert comp.get_entity("sensor.lp_home_wind_bearing").cfg.circular == 360.0
+    assert comp.get_entity("sensor.lp_home_wind_bearing").core.period == 360.0
     assert hass.states.get("sensor.lp_home_temperature").attributes["device_class"] == "temperature"
     assert hass.states.get("sensor.lp_home_wind_speed").attributes["unit_of_measurement"] == "km/h"
     # a missing attribute: the entity exists, without a value
@@ -189,8 +189,8 @@ async def test_sun_elevation_is_not_circular_azimuth_is(hass: HomeAssistant):
         {"source": "sun.sun", "attribute": "azimuth"},
     ])
     comp = hass.data["entity_components"]["sensor"]
-    assert comp.get_entity("sensor.lp_sun_elevation").cfg.circular is None
-    assert comp.get_entity("sensor.lp_sun_azimuth").cfg.circular == 360.0
+    assert comp.get_entity("sensor.lp_sun_elevation").core.period is None
+    assert comp.get_entity("sensor.lp_sun_azimuth").core.period == 360.0
     assert float(hass.states.get("sensor.lp_sun_elevation").state) == -5
 
 
@@ -318,7 +318,7 @@ async def test_sub_attribute_source(hass: HomeAssistant):
     assert st.attributes["friendly_name"] == "Home : Forecast › 0 › Temperature (Filtered)"
     assert st.attributes["unit_of_measurement"] == "°C"
     comp = hass.data["entity_components"]["sensor"]
-    assert comp.get_entity("sensor.lp_home_forecast_0_wind_bearing").cfg.circular == 360.0
+    assert comp.get_entity("sensor.lp_home_forecast_0_wind_bearing").core.period == 360.0
     ent = er.async_get(hass).async_get("sensor.lp_home_forecast_0_temperature")
     assert ent.unique_id == "lowpass_dt::lp_weather.home.forecast.0.temperature"
     # a new value at the end of the path is a sample; another one in the forecast is not

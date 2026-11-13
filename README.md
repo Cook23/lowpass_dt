@@ -22,6 +22,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/v1.4-dev/CHANGELOG.md) for the complete, version-by-version detail.
 
+- **v1.4.4 (beta)** — Several filters on one source, each with a `name` of its own.
 - **v1.4.3 (beta)** — Sub-attributes as the source, by their path (`forecast.0.temperature`), as history-explorer-card reads them.
 - **v1.4.1 (beta)** — An attribute as the source (`attribute:`, or `climate.salon.current_temperature`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
 - **v1.4.0 (beta)** — The exact first-order low-pass whatever the source's rhythm, the output followed between two samples (no more delay of one sample on slow sources); a test suite against a real Home Assistant.
@@ -127,7 +128,9 @@ The silence threshold is learned automatically from the source's observed update
 - Synthetic updates are injected at the source's mean update rate (capped at `tau`).
 - The filter converges smoothly toward the last known real value.
 - The final published output equals the last real value received before silence.
-- When the source resumes, an end-of-silence marker is published to ensure correct graph representation.
+- When the source resumes, an end-of-silence marker closes the flat plateau, so that a graph drawn from the stored points shows it flat rather than as a diagonal: the plateau's value, nudged by 10^-(decimals+1) toward the new value (never outside the source's range). It is published when the output had reached the last value and the new value departs from it by at least the deadband — not on `total` / `total_increasing` sources.
+
+What counts as a sample, and so ends a silence: for a source's state, every change Home Assistant reports — a new value, but also the same value with another attribute changed, or a sensor that reports each measure even when equal (`force_update`); for an [attribute](#filtering-an-attribute), only a new value of that attribute. A source repeating the same state with nothing else changed is not seen, and is silent.
 
 No frozen fake values. No interpolation artifacts.
 
@@ -151,6 +154,7 @@ The deadband threshold is estimated from the signal's own variability over time,
 - Divides the writes by 10 or more, while keeping the changes of state.
 - Falls back to a fixed deadband if `deadband` is explicitly set.
 - Integral correction ensures slow drifts are still captured even below the threshold.
+- Never below 0.001 in the source's unit: for a source whose variations stay under that (2·10⁻⁴ ± 10⁻⁵), set `deadband` and `round` by hand, or use a smaller unit.
 
 ---
 
@@ -167,7 +171,7 @@ The deadband threshold is estimated from the signal's own variability over time,
 
 ### Home Assistant versions
 
-The 1.4 line is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older Home Assistant versions are not covered by the automated tests.
+The 1.4 line is tested with automated tests against **Home Assistant 2025.1, 2025.6, 2025.10, 2026.2 and 2026.10**: the creation of filtered entities and their `entity_id` (never derived from the friendly name, no creation loop with a broad pattern), the filter, silences, patterns and restarts. These recent versions are therefore relatively safe; older Home Assistant versions are not covered by the automated tests, and HACS installs the 1.4 line from 2025.1 on.
 
 ### HACS (recommended)
 
@@ -203,7 +207,22 @@ lowpass_dt:
       max_rate_dt: 10
 ```
 
-Except for `source`, all parameters are optional. Default values are generally sufficient. Unknown keys — a typo, or `sensor:` instead of `sensors:` — are reported as warnings in the log instead of being silently ignored.
+Except for `source`, all parameters are optional. Default values are generally sufficient. Unknown keys — a typo, or `sensor:` instead of `sensors:` — are reported as warnings in the log instead of being silently ignored, and so are invalid values: the option then takes its default.
+
+One source can have several filters, each with a `name` of its own:
+
+```yaml
+lowpass_dt:
+  sensors:
+    - source: sensor.power
+      tau: 30
+      name: Power (smooth)
+    - source: sensor.power
+      tau: 3600
+      name: Power (hourly trend)
+```
+
+Two entries that would give the same filtered entity — the same source without a name of its own, or two sources of different domains with the same object id (`sensor.x` and `input_number.x`, both `sensor.lp_x`) — are reported in the log, and only the first one is created: give the other a `name` (the same source) or a `unique_id`.
 
 ---
 
@@ -304,8 +323,8 @@ The deadband is there so as not to flood the Recorder: keep about one point in t
 
 ### 3. Rate limits
 
-- `max_rate_dt` (10 s): at most one write per this interval — except right after a silence.
-- `min_rate_dt` (3600 s): at least one write per this interval, even when nothing changes.
+- `max_rate_dt` (10 s): at most one write per this interval — except the first real value right after a silence.
+- `min_rate_dt` (3600 s): at least every this interval, the value is published again, whatever the deadband. A value that has moved, even under the deadband, is written; one still the same once rounded is not recorded again by Home Assistant.
 
 ---
 
@@ -344,12 +363,12 @@ A deviation smaller than the deadband `D` is still written if it lasts: the long
 | `deadband_k_sigma` | float | dimensionless (multiplier) | 2.0 | Multiplies the estimated σ to get the adaptive deadband (`deadband = k × σ`). Mostly sets how soon a change is written: lower = sooner, a few more writes; higher = later, fewer writes. Only relevant when `deadband` is not set. |
 | `min_rate_dt` | float | seconds | 3600 | Maximum interval between publishes (heartbeat) |
 | `max_rate_dt` | float | seconds | 10 | Minimum interval between publishes (rate limiter) |
-| `round` | int | number of decimal places | auto | Number of decimal digits to round the published value to (e.g. `round: 2` → `12.345` becomes `12.35`). If omitted, decimals are chosen automatically and adjusted dynamically from the effective deadband. |
-| `circular` | string | same unit as the source sensor (a period) | automatic | Period for circular sensors (angles): the filter averages across 0/360 (359 and 1 average to 0, not 180). Absent, `null` or `none`: automatic — a source with state class `measurement_angle` or a unit of exactly `°` (not `°C`/`°F`) is circular with a period of 360. `false`: never. A number or numeric string (`360`, `6.28`): that period; `2pi` (any case, spaces ignored): 2π. Any other value, or a period ≤ 0, disables it with a warning. Never applies to a `total_increasing` source. Same values as the `circular` option of [history-explorer-card](https://github.com/Cook23/history-explorer-card). |
-| `silence` | string | — | None | Value published after convergence: `last` (default), `zero`, `unknown` |
+| `round` | int | number of decimal places | auto | Number of decimal digits to round the published value to (e.g. `round: 2` → `12.345` becomes `12.35`; a negative number rounds to tens, hundreds…). A whole number: any other value is reported and ignored. If omitted, decimals are chosen automatically and adjusted dynamically from the effective deadband. |
+| `circular` | number, string or `false` | same unit as the source sensor (a period) | automatic | Period for circular sensors (angles): the filter averages across 0/360 (359 and 1 average to 0, not 180). Absent, `null` or `none`: automatic — a source with state class `measurement_angle` or a unit of exactly `°` (not `°C`/`°F`) is circular with a period of 360. `false`: never. A number or numeric string (`360`, `6.28`): that period; `2pi` (any case, spaces ignored): 2π. Any other value, or a period ≤ 0, disables it with a warning. Never applies to a `total_increasing` source. Same values as the `circular` option of [history-explorer-card](https://github.com/Cook23/history-explorer-card). |
+| `silence` | string | — | `last` | Value published after convergence: `last`, `zero` (also written `0`), `unknown`; `none` is `last` |
 | `debug` | boolean | — | false | Enable verbose attributes |
 
-A pattern never filters an entity of this integration, even if the match string matches it (see [Filtering a filtered entity](#filtering-a-filtered-entity)). Creation is limited to 100 entities per match string. When a source matches several patterns, the first matching pattern in the list applies.
+A pattern never filters an entity of this integration, even if the match string matches it (see [Filtering a filtered entity](#filtering-a-filtered-entity)). Creation is limited to 100 entities per match string, at startup and for sources appearing later alike. A pattern filters numeric sources only; a source not ready at startup (unknown) gets its filtered entity once it has a number. When a source matches several patterns, the first matching pattern in the list applies.
 
 When a source disappears, or its entry leaves the configuration, its filtered entity is not removed at once: at the first start of Home Assistant without it, the entity is kept and shown *no longer provided by the integration* — a source that is only late to start (a YAML sensor without `unique_id`) gets it back as it was, renamed `entity_id` included. It is removed at the next restart if still without a source. Reloading the integration does not count as a restart.
 
@@ -357,10 +376,10 @@ When a source disappears, or its entry leaves the configuration, its filtered en
 
 When only one of the two is set and it conflicts with the other's default, the other follows it: `min_rate_dt: 2` alone sets `max_rate_dt` to 1, `max_rate_dt: 7200` alone sets `min_rate_dt` to 14400.
 
-`min_rate_dt` ensures a minimum publish rate even when the signal remains stable while the source is not silent.
+`min_rate_dt` ensures the value is published again at least this often while the source is not silent, even when the signal remains stable; Home Assistant records it only if it has changed.
 `max_rate_dt` is a last line of defense against flooding the Recorder and should almost never be reached with the adaptive deadband — a publish it blocks once σ has settled is logged (at debug level). With a fixed `deadband` (including `0`) it is the normal rate limiter, and blocked publishes are not logged.
 
-`silence` controls what value is published after the filter converges during silence. Use `zero` for sensors where silence means the device is off (power, current...) and the source failed to transmit that final zero. Use `unknown` when the value during silence is genuinely indeterminate. For `total` and `total_increasing` sensors this parameter has low effect — the end-of-silence marker is omitted so HA interpolates diagonally, which correctly reflects ongoing accumulation.
+`silence` controls what value is published after the filter converges during silence. Use `zero` for sensors where silence means the device is off (power, current...) and the source failed to transmit that final zero: the filter then holds 0, and when the source resumes the output rises from 0. Use `unknown` when the value during silence is genuinely indeterminate: when the source resumes, the output starts again from the value it fell silent on. For `total` and `total_increasing` sensors this parameter has low effect: `zero` shows *unknown*, never 0 (Home Assistant's statistics would take a 0 for a reset of the counter), and the end-of-silence marker is omitted so HA interpolates diagonally, which correctly reflects ongoing accumulation.
 
 ### Deadband parameters in practice
 
@@ -423,7 +442,8 @@ Event-driven, no polling. How the code is organized, and where a change goes: [A
 
 - Event driven, no background loops
 - Injection active only during silence
-- Fixed cost per update, regardless of sensor count
+- Fixed cost per update of a filtered source, regardless of sensor count
+- With `patterns`, each state change in Home Assistant is matched against the patterns: a small cost, in proportion to the whole activity of Home Assistant
 
 ---
 

@@ -1,10 +1,8 @@
 """Source state parsing and output rounding helpers."""
 import pytest
 
+from custom_components.lowpass_dt.config import parse_state
 from custom_components.lowpass_dt.publisher import _update_decimals
-from custom_components.lowpass_dt.sensor import LowpassDtSensor
-
-parse = LowpassDtSensor._parse_source_value
 
 
 @pytest.mark.parametrize(
@@ -22,7 +20,7 @@ parse = LowpassDtSensor._parse_source_value
     ],
 )
 def test_parse_ok(state, expected):
-    assert parse(None, state) == expected
+    assert parse_state(state) == expected
 
 
 @pytest.mark.parametrize(
@@ -35,7 +33,7 @@ def test_parse_ok(state, expected):
     ],
 )
 def test_parse_number_with_unit(state, expected):
-    assert parse(None, state) == expected
+    assert parse_state(state) == expected
 
 
 @pytest.mark.parametrize(
@@ -44,7 +42,7 @@ def test_parse_number_with_unit(state, expected):
 )
 def test_parse_rejects_non_measurements(state):
     """Dates, times, versions, a decimal comma: not a number followed by a unit."""
-    assert parse(None, state) == (None, None)
+    assert parse_state(state) == (None, None)
 
 
 @pytest.mark.parametrize("deadband, decimals", [(0.5, 1), (0.05, 2), (5, 0), (0.0001, 5)])

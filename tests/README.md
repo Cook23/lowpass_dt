@@ -22,6 +22,7 @@ The CI runs the suite on all five; the two "Recreate entity IDs" tests are skipp
 | `test_entity.py` | The entity in Home Assistant: publishing, silence, marker, circular, total_increasing, restore |
 | `test_patterns.py` | `patterns`: startup scan, dynamic creation, cleanup, recursion guard, reload |
 | `test_entity_id.py` | entity_id never derived from the friendly name, on every asynchronous path |
+| `test_attributes.py` | an attribute or a sub-attribute as the source: value, unit, device and state class, angles (one test skipped on Home Assistant versions without the `wind_direction` device class) |
 | `test_behavior.py` | the filter as a whole, in the normal regime (tau at least 10 source periods: first order, few writes, a natural curve redrawn by straight lines or splines) and when the source slows down beyond tau (a sound output); `-s` prints the measures |
 
 Tests marked `xfail(strict=True)` state a goal the code does not reach yet, with the reason: when

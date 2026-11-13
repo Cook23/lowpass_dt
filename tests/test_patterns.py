@@ -390,3 +390,138 @@ async def test_pattern_removed_from_the_configuration(hass: HomeAssistant):
     await restart(hass, "run 3")
     assert lowpass_ids(hass) == []
 
+
+
+async def test_source_unknown_at_start_waits_for_a_number(hass: HomeAssistant):
+    """A source not ready at the start (unknown) gets no filtered entity until it has a
+    number: a text sensor not initialised yet used to get one, kept for ever."""
+    eid = register_source(hass, "power_mode")
+    hass.states.async_set(eid, "unknown", {})
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    assert lowpass_ids(hass) == []
+    hass.states.async_set(eid, "eco", {})
+    await hass.async_block_till_done()
+    assert lowpass_ids(hass) == []
+    hass.states.async_set(eid, "12", ATTRS)                     # a number after all
+    await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.lp_power_mode"]
+
+
+async def test_source_unknown_at_restart_keeps_its_filtered_entity(hass: HomeAssistant):
+    """A source late at a restart (unknown), already filtered before: its entity is
+    provided at once, as before."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    hass.states.async_set(eid, "unknown", ATTRS)
+    await restart(hass, "run 2")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert absent_mark(hass, "sensor.lp_power_a") is None
+    assert hass.states.get("sensor.lp_power_a").state not in ("unavailable", "unknown")
+
+
+
+async def test_pattern_limit_counts_every_creation_and_keeps_existing_entities(hass: HomeAssistant, monkeypatch, caplog):
+    """MAX_PATTERN_ENTITIES per pattern, at the start and for sources appearing later
+    alike (the later ones had a count of their own). Past the limit, the startup scan goes
+    on: an existing filtered entity whose source is there is never marked for removal."""
+    from custom_components.lowpass_dt import loader
+
+    for n in "abcde":
+        hass.states.async_set(register_source(hass, f"power_{n}"), "10", ATTRS)
+    monkeypatch.setattr(loader, "MAX_PATTERN_ENTITIES", 5)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    assert len(lowpass_ids(hass)) == 5
+
+    monkeypatch.setattr(loader, "MAX_PATTERN_ENTITIES", 3)
+    await restart(hass, "run 2")
+    await restart(hass, "run 3")
+    assert len(lowpass_ids(hass)) == 5                                 # none marked, none removed
+    assert all(absent_mark(hass, e) is None for e in lowpass_ids(hass))
+    assert "reached its limit" in caplog.text
+
+    caplog.clear()
+    hass.states.async_set("sensor.power_f", "10", ATTRS)               # appears later: over the limit
+    await hass.async_block_till_done()
+    assert "sensor.lp_power_f" not in lowpass_ids(hass)
+    assert "reached its limit" not in caplog.text                     # (reported once, at the scan)
+
+
+async def test_two_entries_on_one_source_with_names_of_their_own(hass: HomeAssistant, caplog):
+    """Two sensors: entries on the same source, each with a name of its own: two filters
+    (only the last one was created, with no message)."""
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    await setup_lowpass(hass, sensors=[
+        {"source": "sensor.src", "tau": 30, "name": "Fast"},
+        {"source": "sensor.src", "tau": 600, "name": "Slow"},
+    ])
+    assert lowpass_ids(hass) == ["sensor.fast", "sensor.slow"]
+    ents = hass.data["entity_components"]["sensor"]
+    assert ents.get_entity("sensor.fast").cfg.tau == 30 and ents.get_entity("sensor.slow").cfg.tau == 600
+    assert "same filtered entity" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        {"source": "sensor.src", "tau": 600},                   # no name
+        {"source": "sensor.src", "tau": 600, "name": "Fast"},   # the same name
+    ],
+)
+async def test_two_entries_on_one_source_without_names_of_their_own(hass: HomeAssistant, caplog, second):
+    """Without a name of its own, the second entry would be the same filtered entity: the
+    first one is kept, the other reported."""
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    first = {"source": "sensor.src", "tau": 30, **({"name": "Fast"} if "name" in second else {})}
+    await setup_lowpass(hass, sensors=[first, second])
+    assert len(lowpass_ids(hass)) == 1
+    assert hass.data["entity_components"]["sensor"].get_entity(lowpass_ids(hass)[0]).cfg.tau == 30
+    assert "same filtered entity" in caplog.text
+
+
+async def test_sources_of_two_domains_with_one_object_id(hass: HomeAssistant, caplog):
+    """sensor.x and input_number.x give the same filtered entity: the second is reported
+    (Home Assistant used to drop it, with an error of its own); a unique_id makes it a
+    filter of its own."""
+    hass.states.async_set("sensor.x", "10", ATTRS)
+    hass.states.async_set("input_number.x", "20", {})
+    await setup_lowpass(hass, sensors=[{"source": "sensor.x"}, {"source": "input_number.x"}])
+    assert lowpass_ids(hass) == ["sensor.lp_x"]
+    assert "same filtered entity" in caplog.text
+    assert "does not generate unique IDs" not in caplog.text
+
+
+async def test_sources_of_two_domains_with_a_unique_id(hass: HomeAssistant, caplog):
+    hass.states.async_set("sensor.x", "10", ATTRS)
+    hass.states.async_set("input_number.x", "20", {})
+    await setup_lowpass(hass, sensors=[{"source": "sensor.x"}, {"source": "input_number.x", "unique_id": "lp_number_x"}])
+    assert len(lowpass_ids(hass)) == 2
+    assert "same filtered entity" not in caplog.text
+
+
+async def test_yaml_changed_between_two_starts(hass: HomeAssistant):
+    """The YAML changed while Home Assistant was stopped: the entry takes the new one."""
+    from homeassistant.setup import async_setup_component
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    MockConfigEntry(domain="lowpass_dt", source="import", unique_id="lowpass_dt", data={"sensors": [{"source": "sensor.src", "tau": 30}]}).add_to_hass(hass)
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    assert await async_setup_component(hass, "lowpass_dt", {"lowpass_dt": {"sensors": [{"source": "sensor.src", "tau": 600}]}})
+    await hass.async_block_till_done()
+    assert hass.data["entity_components"]["sensor"].get_entity("sensor.lp_src").cfg.tau == 600
+
+
+async def test_yaml_section_removed(hass: HomeAssistant):
+    """lowpass_dt: removed from the YAML: its entry, and its entities, go."""
+    from homeassistant.setup import async_setup_component
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    MockConfigEntry(domain="lowpass_dt", source="import", unique_id="lowpass_dt", data={"sensors": [{"source": "sensor.src"}]}).add_to_hass(hass)
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    assert await async_setup_component(hass, "lowpass_dt", {})
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entries("lowpass_dt") == []
+    assert hass.states.get("sensor.lp_src") is None

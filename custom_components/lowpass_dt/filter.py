@@ -14,10 +14,14 @@ def _alpha(dt, tau):
 
 
 class LowpassCore:
-    """Pure math core: low-pass, adaptive sigma, deadband, rounding."""
+    """Pure math core: low-pass, adaptive sigma, deadband."""
 
     def __init__(self, cfg):
         self.cfg = cfg
+
+        # circular period (None: a plain number): the configured one, or the one resolved
+        # at runtime (an angle detected, or turned off for a total_increasing source)
+        self.period = cfg.circular
 
         # filter state
         self.y = None
@@ -30,13 +34,6 @@ class LowpassCore:
         self.src_sigma = None
         self.src_m2 = None
 
-        self.time_last_pub = None
-
-        # error for deadband
-        self.err = 0.0
-        # integral error for deadband
-        self.err_i = 0.0
-
         # sigma horizon start (None = just started / no restore)
         self.t_sigma_start = None
 
@@ -45,12 +42,23 @@ class LowpassCore:
         self.t_last_real = None
 
     # ------------------------------------------------------------
+    # Difference a - b (the shortest way around for a circular value)
+    # ------------------------------------------------------------
+    def diff(self, a, b):
+        if self.period is None:
+            return a - b
+        return ((a - b + self.period / 2) % self.period) - self.period / 2
+
+    def set_period(self, period):
+        self.period = period
+
+    # ------------------------------------------------------------
     # Update filter from real source value
     # ------------------------------------------------------------
     def update_from_source(self, x, now):
         """Update filter from real source value."""
         if self.y is None:
-            self.y = x % self.cfg.circular if self.cfg.circular is not None else x
+            self.y = x % self.period if self.period is not None else x
             self.t_prev = now
             self.t_last_real = now
             self.x_prev = x
@@ -75,13 +83,9 @@ class LowpassCore:
 
         # Zero-order hold (ZOH): dt[n] is the duration during which x_prev
         # (not the newly arrived x) was the actual value of the signal.
-        if self.cfg.circular is None:
-            self.y = self.y + alpha * (x_prev - self.y)
-        else:
-            self.y = (
-                self.y
-                + alpha * (((x_prev - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
-            ) % self.cfg.circular
+        self.y = self.y + alpha * self.diff(x_prev, self.y)
+        if self.period is not None:
+            self.y %= self.period
 
         self.t_prev = now
         self.x_prev = x
@@ -95,16 +99,10 @@ class LowpassCore:
         # gives the filter its value (last state, or the source's) before any sample.
         if self.t_sigma_start is None:
             self.t_sigma_start = now
-        tau_lp = max(0.0, float(self.cfg.tau))
-        tau_s_min = 10.0 * tau_lp
+        tau_s_min = 10.0 * tau
         tau_s_max = max(0.0, float(self.cfg.deadband_tau_sigma))
-
-        if self.t_sigma_start is None:
-            # just started (no restore context)
-            tau_s_dynamic = tau_s_min
-        else:
-            elapsed = max(0.0, now - self.t_sigma_start)
-            tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
+        elapsed = max(0.0, now - self.t_sigma_start)
+        tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
 
         dt_real = max(0.0, now - self.t_last_real) if self.t_last_real is not None else dt
         self.t_last_real = now
@@ -114,9 +112,9 @@ class LowpassCore:
             self.src_mean = self.y
             self.src_m2 = self.y * self.y
             self.src_var = 0.0
-        elif self.cfg.circular is not None:
-            err = ((self.y - self.src_mean + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
-            self.src_mean = (self.src_mean + beta * err) % self.cfg.circular
+        elif self.period is not None:
+            err = self.diff(self.y, self.src_mean)
+            self.src_mean = (self.src_mean + beta * err) % self.period
             self.src_var = max((1 - beta) * self.src_var + beta * err * err, 0.0)
         else:
             self.src_m2 = self.src_var + self.src_mean ** 2
@@ -142,13 +140,9 @@ class LowpassCore:
         dt = max(0.0, now - t_prev)
         alpha = _alpha(dt, tau)
 
-        if self.cfg.circular is None:
-            self.y = self.y + alpha * (last_source_value - self.y)
-        else:
-            self.y = (
-                self.y
-                + alpha * (((last_source_value - self.y + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2)
-            ) % self.cfg.circular
+        self.y = self.y + alpha * self.diff(last_source_value, self.y)
+        if self.period is not None:
+            self.y %= self.period
 
         self.t_prev = now
 

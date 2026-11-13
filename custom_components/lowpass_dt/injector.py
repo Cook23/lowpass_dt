@@ -55,6 +55,25 @@ class TauInjector:
     def start(self):
         self._stopped = False
 
+    @property
+    def running(self) -> bool:
+        return not self._stopped
+
+    def detect_silence_soon(self):
+        """As if a silence was detected, at the next turn of the event loop: a start
+        without interval statistics (a new entity) has no limit to wait for."""
+        if self._stopped or self.unsub_silence is not None:
+            return
+        self.unsub_silence = self.hass.loop.call_soon(self._on_silence_detected, None).cancel
+
+    def restore_stats(self, dt_mean, dt_m2, t_last_source):
+        """The interval statistics saved by a previous run."""
+        self.dt_mean = dt_mean
+        self.dt_m2 = dt_m2
+        self.t_last_source = t_last_source
+        if dt_mean is not None and dt_m2 is not None:
+            self._compute_limits()
+
     # ------------------------------------------------------------
     # Public cleanup
     # ------------------------------------------------------------
@@ -104,10 +123,7 @@ class TauInjector:
 
         # keep following while the output is still away from the source by a deadband
         # (the rest, below the deadband, is left to the integral term and the silence)
-        diff = self.core.y - last_source_value
-        if self.cfg.circular is not None:
-            diff = ((diff + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
-        if abs(diff) >= self.core.effective_deadband():
+        if abs(self.core.diff(self.core.y, last_source_value)) >= self.core.effective_deadband():
             self.unsub_track = async_call_later(self.hass, self.track_step, self._on_track)
 
     # ------------------------------------------------------------
