@@ -6,7 +6,9 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
-## v1.4.4 (beta)
+## v1.4.4
+
+The 1.4 line is no longer a beta: it is the current version. The 1.3 line stays on the branch `v1.3-legacy`, for fixes only.
 
 Fixes from an independent review of the 1.4 code.
 

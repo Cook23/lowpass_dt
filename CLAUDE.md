@@ -5,9 +5,11 @@ Code in `custom_components/lowpass_dt/`, organized as described in `ARCHITECTURE
 up to date). User-facing changes go in `CHANGELOG.md`; the README "Version highlights" lists
 new features only, never bug fixes.
 
-Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read `BRANCH.md`
-on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
-`main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
+Two lines are maintained: `v1.4-dev` (1.4, the current version, out of beta since 1.4.4,
+the repository's default branch) and `v1.3-legacy` (1.3.x, the former `main`, fixes only).
+Read `BRANCH.md` on the branch you work on first. Work branches for pull requests:
+`claude/v1.4-dev-port` (from `v1.4-dev`) and `claude/v1.3-legacy-port` (from `v1.3-legacy`).
+Tests: see `tests/README.md`.
 
 ## What the filter is for (set by the user)
 
@@ -75,15 +77,15 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
   never to have existed. On GitHub it shows as a discrepancy: the last tag exists, its release
   doesn't. Seeing that discrepancy without the user having said so: ask them whether that
   version is dead, before merging.
-- **The CHANGELOG's section is the version's number** (`## v1.4.4 (beta)`), released or not — never
+- **The CHANGELOG's section is the version's number** (`## v1.4.4`), released or not — never
   `[Unreleased]`. Whether a version is released is on GitHub (its releases), not in the files.
 - **Build numbers** (`1.4.4b1`, `b2`…) only in Claude's working copy and in discussions with
   the user — never merged: not in `manifest.json`, the CHANGELOG, the docs, a code comment, or a commit
   or PR title.
   Each build is one commit, pushed to the work branch, so that builds can be compared
   (`git diff`) and undone (`git revert`); the build ↔ commit table is given to the user.
-- 1.4 releases are betas (GitHub pre-releases).
-- **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
+- 1.4 releases are releases since 1.4.4 (1.4.0 to 1.4.3 were betas, GitHub pre-releases).
+- **Work branches** (`claude/v1.3-legacy-port`, `claude/v1.4-dev-port`) are reset to their line
   after each merge. Nothing is merged without the user asking.
 - **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,
   and only at the user's request.

@@ -11,9 +11,6 @@
 > ⚠️ **Experimental – used in real life by a few beta testers**, and checked by an automated test suite against a real Home Assistant.
 > Works well in our environments. May break yours. Back up Home Assistant before installing.
 
-> [!IMPORTANT]
-> **This is a beta (1.4)**, published alongside the 1.3 line, which stays the recommended one. To try it, enable *Show beta versions* for this repository in HACS; to go back, download the latest 1.3 the same way. Feedback is welcome in an [issue](https://github.com/Cook23/lowpass_dt/issues).
-
 *Developed with Claude Code, which modifies, reviews and tests the integration, and runs its automated tests against a real Home Assistant core.*
 
 ---
@@ -22,7 +19,7 @@
 
 A quick look at the milestones — see [CHANGELOG.md](https://github.com/Cook23/lowpass_dt/blob/v1.4-dev/CHANGELOG.md) for the complete, version-by-version detail.
 
-- **v1.4.4 (beta)** — Several filters on one source, each with a `name` of its own.
+- **v1.4.4** — The 1.4 line out of beta. Several filters on one source, each with a `name` of its own.
 - **v1.4.3 (beta)** — Sub-attributes as the source, by their path (`forecast.0.temperature`), as history-explorer-card reads them.
 - **v1.4.1 (beta)** — An attribute as the source (`attribute:`, or `climate.salon.current_temperature`): a weather's wind speed, a thermostat's temperature, filtered into an ordinary sensor with its unit, device class and state class; `unit`, `device_class` and `state_class` to set them on any filtered entity.
 - **v1.4.0 (beta)** — The exact first-order low-pass whatever the source's rhythm, the output followed between two samples (no more delay of one sample on slow sources); a test suite against a real Home Assistant.
