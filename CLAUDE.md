@@ -4,9 +4,11 @@ Home Assistant custom integration (HACS): a time-aware low-pass filter for senso
 Code in `custom_components/lowpass_dt/`; user-facing changes go in `CHANGELOG.md` and the
 README "Version highlights".
 
-Two lines are maintained: `main` (stable 1.3.x) and `v1.4-dev` (1.4 beta). Read `BRANCH.md`
-on the branch you work on first. Work branches for pull requests: `claude/v1.3-port` (from
-`main`) and `claude/v1.4-dev-port` (from `v1.4-dev`). Tests: see `tests/README.md`.
+Two lines are maintained: `v1.4-dev` (1.4, the current version, out of beta since 1.4.4,
+the repository's default branch) and `v1.3-legacy` (1.3.x, the former `main`, fixes only).
+Read `BRANCH.md` on the branch you work on first. Work branches for pull requests:
+`claude/v1.4-dev-port` (from `v1.4-dev`) and `claude/v1.3-legacy-port` (from `v1.3-legacy`).
+Tests: see `tests/README.md`.
 
 ## Versions (same rules as history-explorer-card) — set by the user, not negotiable
 
@@ -33,8 +35,8 @@ on the branch you work on first. Work branches for pull requests: `claude/v1.3-p
 - **Build numbers** (`1.3.20b1`, `b2`…) only in Claude's working copy and in discussions with
   the user — never merged: not in `manifest.json`, the CHANGELOG, the docs, a code comment, or a commit
   or PR title.
-- 1.4 releases are betas (GitHub pre-releases).
-- **Work branches** (`claude/v1.3-port`, `claude/v1.4-dev-port`) are reset to their line
+- 1.4 releases are releases since 1.4.4 (1.4.0 to 1.4.3 were betas, GitHub pre-releases).
+- **Work branches** (`claude/v1.3-legacy-port`, `claude/v1.4-dev-port`) are reset to their line
   after each merge. Nothing is merged without the user asking.
 - **Fixes are made on 1.4 first.** They are backported to 1.3 only once tested in real use,
   and only at the user's request.
