@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import fnmatch
 import logging
 
@@ -27,6 +28,7 @@ from .config import (
     cfg_key,
     make_meta,
     parse_state,
+    slugify_name,
 )
 from .attributes import attribute_value
 
@@ -144,7 +146,13 @@ async def async_setup_entry_loader(
     # ------------------------------------------------------------
     # Build explicit configs
     # ------------------------------------------------------------
-    explicit: dict[str, LowpassCfg] = {}
+    # One filtered entity per entry. Two entries on the same source: a second filter if it
+    # has a name of its own; two entries giving the same filtered entity otherwise (the
+    # same source, or sensor.x and input_number.x): the first is kept, the other reported.
+    explicit: list[tuple[LowpassCfg, CfgMeta]] = []
+    explicit_keys: set[str] = set()                # sources filtered explicitly (LowpassCfg.key)
+    explicit_names: dict[str, set[str | None]] = {}
+    desired_unique_ids: set[str] = set()  # unique_id reference set
     # pattern sources already filtered (keys: see LowpassCfg.key)
     created_keys: set[str] = set()
 
@@ -160,24 +168,30 @@ async def async_setup_entry_loader(
             source=source,
             allow_unique_id=True,
         )
-        explicit[cfg.key] = cfg
+        meta = make_meta(hass, cfg)
+        names = explicit_names.setdefault(cfg.key, set())
+        if meta.unique_id in desired_unique_ids and cfg.unique_id is None and cfg.name and cfg.name not in names:
+            # (the same source, a name of its own: a filter of its own, identified by it)
+            cfg = dataclasses.replace(cfg, unique_id=f"{meta.unique_id_seed}.{slugify_name(cfg.name)}")
+            meta = make_meta(hass, cfg)
+        if meta.unique_id in desired_unique_ids:
+            _LOGGER.warning(
+                "sensors[]: source=%r gives the same filtered entity as an earlier entry (unique_id %r): ignored. "
+                "Give it a name of its own (the same source) or a unique_id.",
+                source,
+                meta.unique_id_seed,
+            )
+            continue
+        names.add(cfg.name)
+        explicit.append((cfg, meta))
+        explicit_keys.add(cfg.key)
+        desired_unique_ids.add(meta.unique_id)
 
     # ------------------------------------------------------------
     # Create explicit entities immediately (boot-safe)
     # ------------------------------------------------------------
 
-    explicit_meta: dict[str, CfgMeta] = {}
-    desired_unique_ids: set[str] = set()  # unique_id reference set
-
-    for cfg in explicit.values():
-        meta = make_meta(hass, cfg)
-        explicit_meta[cfg.key] = meta
-        desired_unique_ids.add(meta.unique_id)
-
-    explicit_entities = [
-        sensor_cls(hass, cfg, explicit_meta[cfg.key])
-        for cfg in explicit.values()
-    ]
+    explicit_entities = [sensor_cls(hass, cfg, meta) for cfg, meta in explicit]
 
     async_add_entities(explicit_entities)
 
@@ -229,7 +243,7 @@ async def async_setup_entry_loader(
             for eid in sorted(sources):
 
                 key = cfg_key(eid, attribute)
-                if key in explicit or key in keep_cfgs:
+                if key in explicit_keys or key in keep_cfgs:
                     continue
 
                 if not fnmatch.fnmatch(eid, pat):
@@ -274,8 +288,7 @@ async def async_setup_entry_loader(
         # ------------------------------------------------------------
         keep_unique_ids: set[str] = set()
 
-        for cfg in explicit.values():
-            meta = make_meta(hass, cfg)
+        for _cfg, meta in explicit:
             keep_unique_ids.add(meta.unique_id)
 
         for cfg in keep_cfgs.values():
@@ -317,6 +330,9 @@ async def async_setup_entry_loader(
         for cfg in create_cfgs.values():
 
             meta = make_meta(hass, cfg)
+            # (already an explicit entity's: sensor.x by a pattern, input_number.x explicit)
+            if meta.unique_id in desired_unique_ids:
+                continue
             desired_unique_ids.add(meta.unique_id)
 
             ent = sensor_cls(hass, cfg, meta)
@@ -379,7 +395,7 @@ async def async_setup_entry_loader(
                 continue
 
             # (already filtered: nothing to build at each of its changes)
-            if key in explicit or key in created_keys:
+            if key in explicit_keys or key in created_keys:
                 continue
 
             if _limit_reached(index, pat):

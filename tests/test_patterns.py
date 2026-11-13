@@ -448,3 +448,55 @@ async def test_pattern_limit_counts_every_creation_and_keeps_existing_entities(h
     await hass.async_block_till_done()
     assert "sensor.lp_power_f" not in lowpass_ids(hass)
     assert "reached its limit" not in caplog.text                     # (reported once, at the scan)
+
+
+async def test_two_entries_on_one_source_with_names_of_their_own(hass: HomeAssistant, caplog):
+    """Two sensors: entries on the same source, each with a name of its own: two filters
+    (only the last one was created, with no message)."""
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    await setup_lowpass(hass, sensors=[
+        {"source": "sensor.src", "tau": 30, "name": "Fast"},
+        {"source": "sensor.src", "tau": 600, "name": "Slow"},
+    ])
+    assert lowpass_ids(hass) == ["sensor.fast", "sensor.slow"]
+    ents = hass.data["entity_components"]["sensor"]
+    assert ents.get_entity("sensor.fast").cfg.tau == 30 and ents.get_entity("sensor.slow").cfg.tau == 600
+    assert "same filtered entity" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        {"source": "sensor.src", "tau": 600},                   # no name
+        {"source": "sensor.src", "tau": 600, "name": "Fast"},   # the same name
+    ],
+)
+async def test_two_entries_on_one_source_without_names_of_their_own(hass: HomeAssistant, caplog, second):
+    """Without a name of its own, the second entry would be the same filtered entity: the
+    first one is kept, the other reported."""
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    first = {"source": "sensor.src", "tau": 30, **({"name": "Fast"} if "name" in second else {})}
+    await setup_lowpass(hass, sensors=[first, second])
+    assert len(lowpass_ids(hass)) == 1
+    assert hass.data["entity_components"]["sensor"].get_entity(lowpass_ids(hass)[0]).cfg.tau == 30
+    assert "same filtered entity" in caplog.text
+
+
+async def test_sources_of_two_domains_with_one_object_id(hass: HomeAssistant, caplog):
+    """sensor.x and input_number.x give the same filtered entity: the second is reported
+    (Home Assistant used to drop it, with an error of its own); a unique_id makes it a
+    filter of its own."""
+    hass.states.async_set("sensor.x", "10", ATTRS)
+    hass.states.async_set("input_number.x", "20", {})
+    await setup_lowpass(hass, sensors=[{"source": "sensor.x"}, {"source": "input_number.x"}])
+    assert lowpass_ids(hass) == ["sensor.lp_x"]
+    assert "same filtered entity" in caplog.text
+    assert "does not generate unique IDs" not in caplog.text
+
+
+async def test_sources_of_two_domains_with_a_unique_id(hass: HomeAssistant, caplog):
+    hass.states.async_set("sensor.x", "10", ATTRS)
+    hass.states.async_set("input_number.x", "20", {})
+    await setup_lowpass(hass, sensors=[{"source": "sensor.x"}, {"source": "input_number.x", "unique_id": "lp_number_x"}])
+    assert len(lowpass_ids(hass)) == 2
+    assert "same filtered entity" not in caplog.text
