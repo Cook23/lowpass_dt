@@ -102,8 +102,12 @@ class Publisher:
     # ------------------------------------------------------------
     # Decide if a publish should occur
     # ------------------------------------------------------------
-    def should_publish(self, now):
-        """Decide if we should publish."""
+    def should_publish(self, now, real=False):
+        """Decide if we should publish.
+
+        real: a real sample of the source — the only one that may pass max_rate_dt right
+        after a silence (an injected or a tracked value never does: the injection would
+        otherwise write at the source's rhythm until it converges)."""
 
         if self.core.y is None:
             return False
@@ -126,7 +130,7 @@ class Publisher:
 
         if abs(self.core.err) >= deadband_eff or abs(self.core.err_i) >= deadband_eff:
             if self.cfg.max_rate_dt > 0:
-                if (now - self.core.time_last_pub) > self.cfg.max_rate_dt or self.output_just_resumed:
+                if (now - self.core.time_last_pub) > self.cfg.max_rate_dt or (real and self.output_just_resumed):
                     return True
                 else:
                     if self.cfg.deadband is None and self.core.t_sigma_start is not None:
@@ -153,11 +157,12 @@ class Publisher:
     # ------------------------------------------------------------
     # MAIN PUBLISH
     # ------------------------------------------------------------
-    def publish(self, src_state, now, dt, force, injected):
+    def publish(self, src_state, now, dt, force, injected, tracked=False):
         """Publish filtered value to Home Assistant.
 
         force: end-of-silence marker (the last source value, nudged so that the Recorder
-        stores it). injected: a synthetic sample during a silence."""
+        stores it). injected: a synthetic sample during a silence. tracked: the output
+        followed between two samples."""
 
         s = self.sensor
         inj = self.sensor.injector
@@ -172,7 +177,8 @@ class Publisher:
         # published as that value exactly (and, by default, the injection stops)
         converged = injected and self._check_convergence(last_src, deadband)
 
-        if not force and not converged and not self.should_publish(now):
+        real = not injected and not force and not tracked
+        if not force and not converged and not self.should_publish(now, real):
             return
 
         dt_output = None if self.core.time_last_pub is None else max(0.0, now - self.core.time_last_pub)
@@ -347,7 +353,7 @@ class Publisher:
             state=str(last_source_value),
         )
 
-        self.publish(fake, now, dt, force=False, injected=injected)
+        self.publish(fake, now, dt, force=False, injected=injected, tracked=not injected)
 
     # ------------------------------------------------------------
     # Output followed between samples (not a silence): the usual publication rules

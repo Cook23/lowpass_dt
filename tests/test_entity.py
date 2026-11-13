@@ -201,6 +201,22 @@ async def test_silence_converges_to_last_value(hass: HomeAssistant, clock, regis
     assert float(hass.states.get(OUT).state) == pytest.approx(50.0, abs=0.002)  # driven to the last value
 
 
+@pytest.mark.parametrize("max_rate_dt", [10, 30])
+async def test_max_rate_dt_limits_writes_during_a_silence(hass: HomeAssistant, clock, registered, max_rate_dt):
+    """The injection computes the output at the source's rhythm, but writes it no more
+    often than max_rate_dt: it used to write each injected value (here every 5 s) until it
+    converged. Only a real sample passes max_rate_dt right after a silence."""
+    hass.states.async_set(SRC, "0", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 120, "deadband": 0, "max_rate_dt": max_rate_dt}])
+    await feed(hass, clock, [(tick(t), jitter(t // 5)) for t in range(5, 200, 5)])
+    await feed(hass, clock, [(200.3, 1000), (205, 1000.5)])
+    writes = recorded(hass, OUT)
+    await clock.run_until(206, 326, step=0.5)
+    assert len(writes) <= 120 / max_rate_dt + 2
+    await clock.run_until(327, 3000, step=5)
+    assert float(hass.states.get(OUT).state) == pytest.approx(1000.5, abs=0.01)   # still reaches it
+
+
 async def test_injection_runs_in_the_event_loop(hass: HomeAssistant, clock, registered, monkeypatch):
     """The injector's timer callbacks are @callback: they run in the event loop, never in
     a worker thread where they would change the filter state while the loop uses it."""
