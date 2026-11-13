@@ -208,8 +208,9 @@ class Publisher:
         if self._breaks_monotonicity(reported):
             return
 
-        # silence: zero / unknown — the plateau reached, the output shows 0 or nothing
-        if was_clamped_to_source and self.cfg.silence in ("zero", "0", "unknown"):
+        # silence: zero / unknown — the plateau reached, the output shows 0 or nothing (at
+        # the next injection only: a source resuming in between never writes it)
+        if injected and was_clamped_to_source and self.cfg.silence in ("zero", "0", "unknown"):
             if self.cfg.silence in ("zero", "0") and s._attr_state_class not in ("total", "total_increasing"):
                 s._attr_native_value = 0.0
             else:
@@ -259,11 +260,10 @@ class Publisher:
     # End-of-silence marker value
     # ------------------------------------------------------------
     def _marker_value(self, reported, decimals):
-        """The plateau's value, nudged below the displayed precision: Home Assistant would
-        not record a state equal to the current one."""
-        if self.cfg.silence == "unknown":
-            value = 0.0
-        elif self.cfg.silence in ("zero", "0"):
+        """The value shown during the silence, nudged below the displayed precision: Home
+        Assistant would not record a state equal to the current one. (With unknown shown,
+        there is no plateau to close: no marker.)"""
+        if self.silence_shown:
             value = 10 ** (-decimals - 1)
         else:
             value = reported + 10 ** (-decimals - 1)

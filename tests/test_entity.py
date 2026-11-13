@@ -247,6 +247,26 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expec
     assert ent.extra_restore_state_data.as_dict()["low_pass"]["silence_shown"] is True
 
 
+@pytest.mark.parametrize("mode", ["zero", "unknown"])
+async def test_silence_value_not_written_when_the_source_resumes_first(hass: HomeAssistant, clock, registered, mode):
+    """The plateau published, the silence value (0, unknown) comes at the next injection:
+    a source resuming in between closes the plateau with the usual marker, and never
+    writes the silence value it had not shown yet (it used to, at the resume)."""
+    hass.states.async_set(SRC, "0", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": mode}])
+    await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    t = 111
+    while not ent.publisher.clamped_to_source:
+        await clock.at(t)
+        t += 1
+        assert t < 2000
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(t, 80)])
+    assert writes and all(w not in ("0.0", "unknown") for w in writes)
+    assert float(writes[0]) == pytest.approx(20.0, abs=0.01)                 # the marker
+
+
 async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
