@@ -132,7 +132,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         use_name = meta.use_name
 
         self._attr_unique_id = meta.unique_id
-        self._unique_id_seed = meta.unique_id_seed
+        self.unique_id_seed = meta.unique_id_seed
 
         # ------------------------------------------------------------
         # ENTITY_ID
@@ -166,6 +166,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._attr_device_class = None
         self._attr_native_value = None
         self._attr_extra_state_attributes = {}
+
+    def write_output(self, value, attributes) -> None:
+        """The value and attributes the publisher decided, written to Home Assistant."""
+        self._attr_native_value = value
+        self._attr_extra_state_attributes = attributes
+        self.async_write_ha_state()
 
     @property
     def held_value(self):
@@ -443,7 +449,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             if self.injector.dt_mean is not None:
                 self.injector.restart_silence_timer()
             else:
-                self.hass.loop.call_soon(self.injector._on_silence_detected, None)
+                self.injector.detect_silence_soon()
         else:
             _LOGGER.debug("no source or output value for %s source=%s", self.entity_id, self.cfg.source)
 
@@ -479,7 +485,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.y = lp.get("y")
         core.t_prev = lp.get("t_prev")
         core.x_prev = lp.get("x_prev")
-        core.time_last_pub = lp.get("time_last_pub")
+        pub.time_last_pub = lp.get("time_last_pub")
         # (period the saved state was computed with; key absent before v1.3.17)
         self._restored_circular = lp.get("circular", _MISSING)
         # (None: saved before 1.4.2, told from the restored state below)
@@ -496,19 +502,13 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         # EMA dt_source
         dt_src = data.get("ema_dt_source", {})
-        inj.dt_mean = dt_src.get("dt_mean")
-        inj.dt_m2 = dt_src.get("dt_m2")
-        inj.t_last_source = dt_src.get("t_last_source")
+        inj.restore_stats(dt_src.get("dt_mean"), dt_src.get("dt_m2"), dt_src.get("t_last_source"))
 
         # EMA dt_output
         dt_out = data.get("ema_dt_output", {})
         pub.dt_output_mean = dt_out.get("dt_output_mean")
         pub.dt_output_m2 = dt_out.get("dt_output_m2")
         pub.decimals = dt_out.get("decimals")
-
-        # Restore limit and interval
-        if inj.dt_mean is not None and inj.dt_m2 is not None:
-            inj._compute_limits()
 
     # ------------------------------------------------------------
     # Export internal state (HA-native persistence)
@@ -521,7 +521,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "y": self.core.y,
                 "t_prev": self.core.t_prev,
                 "x_prev": self.core.x_prev,
-                "time_last_pub": self.core.time_last_pub,
+                "time_last_pub": self.publisher.time_last_pub,
                 "circular": self.core.period,
                 "silence_shown": self.publisher.silence_shown,
                 "silence_source": self.publisher.silence_source,
@@ -685,7 +685,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # that published plateau. Tested on the new value itself: with ZOH the
         # filter output only moves toward it at the next sample.
         deadband = self.core.effective_deadband()
-        converged_before_resume = self.publisher._check_convergence(self.held_value, deadband)
+        converged_before_resume = self.publisher.check_convergence(self.held_value, deadband)
         departs_from_plateau = self._attr_native_value is not None and abs(self.core.diff(x, self._attr_native_value)) >= deadband
         if self.injector.silent and converged_before_resume and departs_from_plateau and self._attr_state_class not in ("total", "total_increasing"):
             marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0

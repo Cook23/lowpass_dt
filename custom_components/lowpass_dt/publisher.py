@@ -52,6 +52,12 @@ class Publisher:
 
         self.decimals = None
 
+        # time of the last write, and the error of the output against it (deadband and
+        # integral term)
+        self.time_last_pub = None
+        self.err = 0.0
+        self.err_i = 0.0
+
     # ------------------------------------------------------------
     # silence: zero shown — the device is off, the value in effect is 0
     # ------------------------------------------------------------
@@ -59,7 +65,7 @@ class Publisher:
         return (
             self.silence_shown
             and self.cfg.silence in ("zero", "0")
-            and self.sensor._attr_state_class not in ("total", "total_increasing")
+            and self.sensor.state_class not in ("total", "total_increasing")
         )
 
     def source_resumed(self):
@@ -71,7 +77,7 @@ class Publisher:
     # ------------------------------------------------------------
     # Convergence detection
     # ------------------------------------------------------------
-    def _check_convergence(self, last_src, deadband):
+    def check_convergence(self, last_src, deadband):
         """The output has reached the source: within the deadband, or, below the displayed
         precision, equal to it once rounded (with `deadband: 0`, the only way it can)."""
         decimals = self.cfg.rounding if self.cfg.rounding is not None else self.decimals
@@ -122,25 +128,25 @@ class Publisher:
         if self.core.y is None:
             return False
 
-        if self.core.time_last_pub is None or self.sensor._attr_native_value is None:
+        if self.time_last_pub is None or self.sensor.native_value is None:
             return True
 
         # deadband + integral correction
         deadband_eff = self.core.effective_deadband()
 
-        self.core.err = self.core.diff(self.core.y, self.sensor._attr_native_value)
+        self.err = self.core.diff(self.core.y, self.sensor.native_value)
 
         # Integral correction: the current error times the time since the last write, so
         # that a lasting small error (a slow drift under the deadband) is written in the
         # end. Close enough to an accumulated integral on a filtered signal (measured:
         # the same writes and accuracy within a few %), and simpler.
-        dt = max(0.0, now - self.core.time_last_pub)
+        dt = max(0.0, now - self.time_last_pub)
         tau_i = max(1.0, self.cfg.tau)
-        self.core.err_i = (self.core.err * dt) / tau_i
+        self.err_i = (self.err * dt) / tau_i
 
-        if abs(self.core.err) >= deadband_eff or abs(self.core.err_i) >= deadband_eff:
+        if abs(self.err) >= deadband_eff or abs(self.err_i) >= deadband_eff:
             if self.cfg.max_rate_dt > 0:
-                if (now - self.core.time_last_pub) > self.cfg.max_rate_dt or (real and self.output_just_resumed):
+                if (now - self.time_last_pub) > self.cfg.max_rate_dt or (real and self.output_just_resumed):
                     return True
                 else:
                     if self.cfg.deadband is None and self.core.t_sigma_start is not None:
@@ -151,15 +157,15 @@ class Publisher:
                                 self.cfg.max_rate_dt,
                                 self.cfg.source,
                                 deadband_eff,
-                                self.core.err,
-                                self.core.err_i,
+                                self.err,
+                                self.err_i,
                             )
                     return False
             else:
                 return True
         else:
             # periodic publish (build_cfg ensures min_rate_dt > max_rate_dt)
-            if (now - self.core.time_last_pub) > self.cfg.min_rate_dt:
+            if (now - self.time_last_pub) > self.cfg.min_rate_dt:
                 return True
 
         return False
@@ -185,13 +191,13 @@ class Publisher:
 
         # During a silence, once the output has converged to the last source value, it is
         # published as that value exactly (and, by default, the injection stops)
-        converged = injected and self._check_convergence(last_src, deadband)
+        converged = injected and self.check_convergence(last_src, deadband)
 
         real = not injected and not force and not tracked
         if not force and not converged and not self.should_publish(now, real):
             return
 
-        dt_output = None if self.core.time_last_pub is None else max(0.0, now - self.core.time_last_pub)
+        dt_output = None if self.time_last_pub is None else max(0.0, now - self.time_last_pub)
         dt_output_sigma = self._update_dt_output_stats(dt_output)
 
         s.sync_source_attributes(src_state.attributes or {})
@@ -224,32 +230,32 @@ class Publisher:
             self.silence_source = last_src
             self.silence_shown = True
             if self.holds_zero():
-                s._attr_native_value = 0.0
+                value = 0.0
                 # (the device is off: the filter holds 0, and starts from it when the
                 # source resumes — not from the value it fell silent on)
                 self.core.y = 0.0
                 self.core.x_prev = 0.0
             else:
-                s._attr_native_value = None
+                value = None
             inj.stop_injection()
             self.output_just_resumed = True
             self.clamped_to_source = False
         else:
-            s._attr_native_value = reported
+            value = reported
 
         # a real sample published: the silence is over
         if not injected and not force:
             self.output_just_resumed = False
             self.silence_shown = False
 
-        s._attr_extra_state_attributes = (
+        attributes = (
             self._debug_attributes(dt, dt_output, dt_output_sigma)
             if self.cfg.debug
             else {"source": self.cfg.source}
         )
 
-        self.core.time_last_pub = now
-        s.async_write_ha_state()
+        self.time_last_pub = now
+        s.write_output(value, attributes)
 
     # ------------------------------------------------------------
     # Rounding (fixed, or derived from the deadband)
@@ -296,9 +302,9 @@ class Publisher:
     # ------------------------------------------------------------
     def _breaks_monotonicity(self, reported):
         s = self.sensor
-        prev = s._attr_native_value
+        prev = s.native_value
 
-        if s._attr_state_class != "total_increasing" or prev is None or reported >= prev:
+        if s.state_class != "total_increasing" or prev is None or reported >= prev:
             return False
 
         if self.reset_pending:
@@ -325,7 +331,7 @@ class Publisher:
     def _debug_attributes(self, dt, dt_output, dt_output_sigma):
         return {
             "source": self.cfg.source,
-            "unique_id": self.sensor._unique_id_seed,
+            "unique_id": self.sensor.unique_id_seed,
 
             "tau_filter": self.cfg.tau,
             "max_rate_dt": self.cfg.max_rate_dt,

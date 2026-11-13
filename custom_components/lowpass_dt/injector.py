@@ -55,6 +55,25 @@ class TauInjector:
     def start(self):
         self._stopped = False
 
+    @property
+    def running(self) -> bool:
+        return not self._stopped
+
+    def detect_silence_soon(self):
+        """As if a silence was detected, at the next turn of the event loop: a start
+        without interval statistics (a new entity) has no limit to wait for."""
+        if self._stopped or self.unsub_silence is not None:
+            return
+        self.unsub_silence = self.hass.loop.call_soon(self._on_silence_detected, None).cancel
+
+    def restore_stats(self, dt_mean, dt_m2, t_last_source):
+        """The interval statistics saved by a previous run."""
+        self.dt_mean = dt_mean
+        self.dt_m2 = dt_m2
+        self.t_last_source = t_last_source
+        if dt_mean is not None and dt_m2 is not None:
+            self._compute_limits()
+
     # ------------------------------------------------------------
     # Public cleanup
     # ------------------------------------------------------------

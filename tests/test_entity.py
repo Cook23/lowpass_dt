@@ -337,7 +337,7 @@ async def test_renaming_entity_id_in_ui_is_kept(hass: HomeAssistant, clock, regi
     assert hass.states.get("sensor.my_power") is not None
     assert hass.states.get(OUT) is None
     ent = hass.data["entity_components"]["sensor"].get_entity("sensor.my_power")
-    assert ent.injector._stopped is False
+    assert ent.injector.running
     for t in range(10, 110, 10):
         await clock.at(t)
         hass.states.async_set(SRC, str(20 + jitter(t // 10)), ATTRS)

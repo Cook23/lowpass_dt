@@ -34,13 +34,6 @@ class LowpassCore:
         self.src_sigma = None
         self.src_m2 = None
 
-        self.time_last_pub = None
-
-        # error for deadband
-        self.err = 0.0
-        # integral error for deadband
-        self.err_i = 0.0
-
         # sigma horizon start (None = just started / no restore)
         self.t_sigma_start = None
 
