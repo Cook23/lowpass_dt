@@ -6,6 +6,41 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
+## v1.4.4 (beta)
+
+Fixes from an independent review of the 1.4 code.
+
+### Added — several filters on one source
+
+- **Two `sensors:` entries on the same source, each with a `name` of its own, give two filters** (two time constants, for instance). Only the last entry used to be created, with no message.
+
+### Fixed — writes during a silence
+
+- **`max_rate_dt` held during the whole convergence.** During a silence, each injected value was written, at the source's rhythm, until the output reached the last value: about 25 writes in two minutes after a step, whatever `max_rate_dt`. They now follow `max_rate_dt`; only the first real value after a silence passes it, as documented.
+- **`silence: zero` / `unknown`: the silence value written when the source resumes.** The plateau published, 0 or *unknown* comes at the next injection; a source resuming in between wrote it at the resume, though it had never been shown. It now closes the plateau with the usual marker.
+- **`silence: zero`: the output rises from 0 when the source resumes.** Silence meant the device was off, but the filter stayed at the value the source fell silent on: at the resume the output went back to it first, then toward the new value. The filter now holds 0, across a restart too. (`unknown` still starts again from the value the source fell silent on.)
+- **The end-of-silence marker could go past the source's range.** Nudged up by 10^-(decimals+1), it went past the maximum when the silence fell on it. It is now nudged toward the new value.
+
+### Fixed — configuration
+
+- **Invalid values taken quietly.** Text, a boolean, `nan` or `inf` for a number (`tau: abc`) gave the default with no message, or was kept (`tau: .inf`); `round: 2.7` became 2. They now give the default with a warning; `round` must be a whole number. `unique_id` in a pattern is reported as ignored, like `name`.
+- **Two entries giving the same filtered entity** — the same source without a name of its own, or `sensor.x` and `input_number.x` (both `sensor.lp_x`) — are reported, and the first one is kept: give the other a `name` or a `unique_id`. The last one used to win, with no message from lowpass_dt.
+
+### Fixed — patterns
+
+- **A text sensor not ready at the start got a filtered entity for ever.** A source still *unknown* at the startup scan was filtered; once it showed text, its filtered entity stayed, unavailable. It now waits for a number, unless its filtered entity exists already (a source late at a restart).
+- **The limit of 100 filtered entities per pattern** was counted per pattern at the start but for all patterns together afterwards, and past it the startup scan stopped, so that existing filtered entities of the sources after it could be removed. It is now one limit per pattern on both paths, and the scan goes on.
+
+### Changed
+
+- The debug attribute `silent` shows whether the source is silent (it showed whether the output had just resumed).
+- HACS installs the 1.4 line from Home Assistant 2025.1 on, the oldest version it is tested with.
+
+### Documentation
+
+- What counts as a sample: for a state, every change Home Assistant reports, even to the same value; for an attribute, only a new value.
+- When the end-of-silence marker is written; `min_rate_dt` publishes the value again whatever the deadband, and Home Assistant records it only if it changed; `silence: zero` on a counter shows *unknown*; the automatic deadband never goes under 0.001; the `silence` and `circular` values in the table of parameters; the cost of `patterns`.
+
 ## v1.4.3 (beta)
 
 ### Changed — a filtered entity without a source is removed at the second restart
