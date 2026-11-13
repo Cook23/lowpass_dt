@@ -124,6 +124,7 @@ async def test_debug_attributes(hass: HomeAssistant, clock):
     assert attrs["tau_filter"] == 10
     assert set(attrs["deadband"]) >= {"deadband", "deadband_filtered_mean", "deadband_filtered_sigma"}
     assert set(attrs["dt_output"]) == {"dt_output", "dt_output_mean", "dt_output_sigma"}
+    assert attrs["source_dt"]["silent"] is False          # the injector's silence state
 
 
 async def test_friendly_name_follows_a_renamed_source(hass: HomeAssistant, clock):

@@ -8,7 +8,6 @@ attribute's name.
 """
 from __future__ import annotations
 
-import math
 import re
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
@@ -17,12 +16,9 @@ from homeassistant.components.sensor.const import (
     DEVICE_CLASS_UNITS,
 )
 
-# ------------------------------------------------------------
-# Value: a number, or a number followed by a unit (12.5 °C, 12,5 %)
-# ------------------------------------------------------------
-# (the card's regex: the unit must not start with a digit or a separator — not a time,
-# a date or a range)
-_NUMBER_UNIT = re.compile(r"^\s*([-+]?\d+(?:[.,]\d+)?(?:[eE][-+]?\d+)?)\s*([^\d\s:.,/+-].*?)\s*$")
+from .config import parse_number
+
+# (a value: a number, or a number followed by a unit — 12.5 °C, 12,5 %: config.parse_number)
 
 
 # ------------------------------------------------------------
@@ -67,27 +63,6 @@ def _leaf_name(path: str) -> str:
     direction: its last key that is not an index (forecast.0.temperature: temperature)."""
     keys = [k for k in path.split(".") if not k.isdigit()]
     return keys[-1] if keys else path
-
-
-def _parse_value(raw) -> tuple[float | None, str | None]:
-    if isinstance(raw, bool):
-        return None, None
-    if isinstance(raw, (int, float)):
-        value = float(raw)
-        return (value, None) if math.isfinite(value) else (None, None)
-    if not isinstance(raw, str):
-        return None, None
-    try:
-        value = float(raw)
-        return (value, None) if math.isfinite(value) else (None, None)
-    except ValueError:
-        pass
-    m = _NUMBER_UNIT.match(raw)
-    if m:
-        value = float(m.group(1).replace(",", "."))
-        if math.isfinite(value):
-            return value, m.group(2)
-    return None, None
 
 
 # ------------------------------------------------------------
@@ -165,7 +140,7 @@ def attribute_value(source: str, attribute: str, attrs) -> tuple[float | None, s
     raw = attribute_at(attrs, attribute)
     if raw is None:
         return None, None
-    value, unit = _parse_value(raw)
+    value, unit = parse_number(raw, attribute=True)
     if value is None:
         return None, None
     d = _domain_unit(source.split(".", 1)[0], _leaf_name(attribute))

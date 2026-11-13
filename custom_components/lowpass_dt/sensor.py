@@ -180,17 +180,13 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         return 0.0 if self.publisher.holds_zero() else self._last_source_value
 
     # ------------------------------------------------------------
-    # Parse source value (numeric extraction with unit detection)
+    # Source value (numeric extraction with unit detection)
     # ------------------------------------------------------------
-    def _parse_source_value(self, state_str):
-        """Extract numeric value and optional unit from source state string."""
-        return parse_state(state_str)
-
     def _source_value(self, state):
         """Numeric value and optional unit of the source: its state, or its attribute."""
         if self.cfg.attribute:
             return attribute_value(self.cfg.source, self.cfg.attribute, state.attributes)
-        return self._parse_source_value(state.state)
+        return parse_state(state.state)
 
     def _source_attributes(self, attrs) -> dict:
         """What the entity takes from the source: its attributes, or for an attribute

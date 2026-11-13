@@ -341,7 +341,7 @@ class Publisher:
             "source_dt": {
                 "source_dt": dt,
                 "source_silence_3sigma": self.dt_silence,
-                "silent": self.output_just_resumed,
+                "silent": self.sensor.injector.silent,
             },
 
             "deadband": {

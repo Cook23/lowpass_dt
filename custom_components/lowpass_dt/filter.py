@@ -99,16 +99,10 @@ class LowpassCore:
         # gives the filter its value (last state, or the source's) before any sample.
         if self.t_sigma_start is None:
             self.t_sigma_start = now
-        tau_lp = max(0.0, float(self.cfg.tau))
-        tau_s_min = 10.0 * tau_lp
+        tau_s_min = 10.0 * tau
         tau_s_max = max(0.0, float(self.cfg.deadband_tau_sigma))
-
-        if self.t_sigma_start is None:
-            # just started (no restore context)
-            tau_s_dynamic = tau_s_min
-        else:
-            elapsed = max(0.0, now - self.t_sigma_start)
-            tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
+        elapsed = max(0.0, now - self.t_sigma_start)
+        tau_s_dynamic = min(tau_s_max, max(tau_s_min, elapsed))
 
         dt_real = max(0.0, now - self.t_last_real) if self.t_last_real is not None else dt
         self.t_last_real = now
