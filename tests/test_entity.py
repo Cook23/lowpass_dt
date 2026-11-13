@@ -166,18 +166,17 @@ async def test_fixed_deadband_suppresses_small_changes(hass: HomeAssistant, cloc
     assert writes == []       # noise of ±0.2 under a 1.0 deadband: nothing written
 
 
-async def test_integral_term_publishes_noise_under_the_deadband(hass: HomeAssistant, clock):
-    """err_i = err × (time since the last write) / tau: the current error held over the whole
-    time since the last write, not an accumulated integral. Far outside the normal regime
-    (tau = 1 s, a value every second), noise ten times under the deadband is then written
-    about every 8 s. In the normal regime (tau ~ 10 source periods) the difference with an
-    accumulated integral is a few % of writes and accuracy (measured with
-    test_behavior.py's scenarios), so the term is kept as is."""
+async def test_integral_term_writes_a_lasting_error_under_the_deadband(hass: HomeAssistant, clock):
+    """No static error: a step smaller than the deadband, then the source holding still, is
+    written in the end by the integral term (err × time since the last write / tau) — once,
+    not again and again."""
     hass.states.async_set(SRC, "20", ATTRS)
-    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 1, "deadband": 1.0, "max_rate_dt": 0.5}])
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 20, "deadband": 1.0, "max_rate_dt": 0.5}])
+    await feed(hass, clock, [(tick(t), 20 + jitter(t)) for t in range(1, 30)])
     writes = recorded(hass, OUT)
-    await feed(hass, clock, [(t, 20 + (0.2 if t % 2 else -0.2)) for t in range(1, 60)])
-    assert len(writes) >= 5
+    await feed(hass, clock, [(tick(t), 20.5 + jitter(t)) for t in range(30, 330)])   # +0.5: under the deadband
+    assert 1 <= len(writes) <= 3
+    assert float(hass.states.get(OUT).state) == pytest.approx(20.5, abs=0.05)
 
 
 async def test_max_rate_dt_limits_writes(hass: HomeAssistant, clock):
@@ -241,8 +240,12 @@ async def test_silence_modes(hass: HomeAssistant, clock, registered, mode, expec
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": mode}])
     await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
+    writes = recorded(hass, OUT)
     await clock.run_until(111, 1500, step=5)
     assert hass.states.get(OUT).state == expected
+    # the plateau at the last value, then the silence value, once
+    assert float(writes[-2]) == pytest.approx(20.0, abs=0.002)
+    assert writes[-1] == expected and writes.count(expected) == 1
     # (saved, so that a restart keeps showing it)
     ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
     assert ent.extra_restore_state_data.as_dict()["low_pass"]["silence_shown"] is True
@@ -564,3 +567,124 @@ async def test_new_entity_interval_statistics_start_from_the_first_interval(hass
     inj = hass.data["entity_components"]["sensor"].get_entity(OUT).injector
     assert inj.dt_mean == pytest.approx(5.0, abs=0.1)
     assert inj.limit < 10
+
+
+# ------------------------------------------------------------------ options end to end
+
+
+async def test_min_rate_dt_reevaluates_the_value_without_the_deadband(hass: HomeAssistant, clock):
+    """min_rate_dt: at least every min_rate_dt, the value is published again whatever the
+    deadband — a value that moved under it is written; one equal once rounded is not
+    recorded again by Home Assistant."""
+    hass.states.async_set(SRC, "20", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 5, "round": 2, "min_rate_dt": 60, "max_rate_dt": 10}])
+    await feed(hass, clock, [(tick(t), 20 + jitter(t)) for t in range(1, 30)])
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(tick(t), 20 + (t - 30) / 600) for t in range(30, 630)])   # +1 in 10 min, under the deadband
+    assert 7 <= len(writes) <= 12                              # about one per minute
+
+
+async def test_min_rate_dt_writes_nothing_when_the_rounded_value_holds(hass: HomeAssistant, clock):
+    hass.states.async_set(SRC, "20", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "deadband": 5, "round": 0, "min_rate_dt": 60, "max_rate_dt": 10}])
+    await feed(hass, clock, [(tick(t), 20 + jitter(t)) for t in range(1, 30)])
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(tick(t), 19.9 if t % 2 else 20.1) for t in range(30, 630)])
+    assert writes == []                                        # 20 every time: nothing new
+
+
+async def test_round_option(hass: HomeAssistant, clock, registered):
+    """round: the decimals written, and the end-of-silence marker one decimal further."""
+    hass.states.async_set(SRC, "12.345", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "round": 1}])
+    assert hass.states.get(OUT).state == "12.3"
+    await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
+    await clock.run_until(111, 900, step=5)
+    assert hass.states.get(OUT).state == "20.0"
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(905, 80)])
+    assert float(writes[0]) == pytest.approx(20.01)           # toward 80, 10^-(1+1)
+
+
+async def test_prefix_suffix_and_unique_id_options(hass: HomeAssistant, clock):
+    hass.states.async_set(SRC, "10", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "prefix": "f_", "suffix": "(smooth)", "unique_id": "my_filter"}])
+    st = hass.states.get("sensor.f_src")
+    assert st is not None and st.attributes["friendly_name"] == "Src (smooth)"
+    assert er.async_get(hass).async_get("sensor.f_src").unique_id == "lowpass_dt::my_filter"
+
+
+async def test_empty_prefix(hass: HomeAssistant, clock):
+    hass.states.async_set("weather.home", "sunny", {"friendly_name": "Home", "temperature": 12.5, "temperature_unit": "°C"})
+    await setup_lowpass(hass, sensors=[{"source": "weather.home.temperature", "prefix": ""}])
+    assert hass.states.get("sensor.home_temperature") is not None
+
+
+async def test_icon_and_state_class_from_the_source(hass: HomeAssistant, clock):
+    """The source's icon is copied; a source with a device class but no state class gets
+    the one its device class implies."""
+    attrs = {"unit_of_measurement": "W", "device_class": "power", "icon": "mdi:flash"}
+    hass.states.async_set(SRC, "10", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.01, "max_rate_dt": 1}])
+    await feed(hass, clock, [(10, 12), (20, 14)], attrs)
+    st = hass.states.get(OUT)
+    assert st.attributes["icon"] == "mdi:flash"
+    assert st.attributes["state_class"] == "measurement"
+
+
+@pytest.mark.parametrize("state_class", ["total", "total_increasing"])
+async def test_silence_zero_on_a_counter_shows_unknown(hass: HomeAssistant, clock, registered, state_class):
+    """On a counter, silence: zero shows unknown, never 0 (Home Assistant's statistics would
+    take a 0 for a reset); no end-of-silence marker."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": state_class}
+    hass.states.async_set(SRC, "10", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": "zero"}])
+    await feed(hass, clock, [(t, 10 + t / 10) for t in range(10, 110, 10)], attrs)
+    await clock.run_until(111, 1500, step=5)
+    assert hass.states.get(OUT).state == "unknown"
+    writes = recorded(hass, OUT)
+    await feed(hass, clock, [(1505, 30)], attrs)
+    assert len(writes) == 1                  # the output from its last value, no marker before it
+
+
+# ------------------------------------------------------------------ circular period change
+
+
+async def test_restored_state_of_another_period_restarts_from_the_source(hass: HomeAssistant, clock):
+    """A filter state saved as a plain number, the source now an angle: the output and the
+    deadband statistics start again from the source (175° and a σ of 150° otherwise)."""
+    t = dt_util.utcnow().timestamp()
+    attrs = {"unit_of_measurement": "°", "state_class": "measurement"}
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, "175.0", attrs),
+                {
+                    "low_pass": {"y": 175.0, "t_prev": t - 5, "x_prev": 350.0, "time_last_pub": t - 5, "circular": None},
+                    "ema_source": {"src_mean": 175.0, "src_var": 22500.0, "t_sigma_start": t - 10000},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 5},
+                    "ema_dt_output": {"dt_output_mean": 10.0, "dt_output_m2": 100.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+    hass.states.async_set(SRC, "350", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert ent.core.period == 360.0
+    assert ent.core.y == pytest.approx(350.0)
+    assert ent.core.src_sigma == pytest.approx(0.0)
+
+
+async def test_angle_detected_while_running(hass: HomeAssistant, clock):
+    """A unit only known later (°): the source becomes an angle, its statistics restart."""
+    hass.states.async_set(SRC, "350", {"state_class": "measurement"})
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 100, "deadband": 0.01, "max_rate_dt": 1}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert ent.core.period is None
+    await feed(hass, clock, [(10, 10), (20, 350)], {"unit_of_measurement": "°", "state_class": "measurement"})
+    assert ent.core.period == 360.0
+    await feed(hass, clock, [(10 * k, 10 if k % 2 else 350) for k in range(3, 200)], {"unit_of_measurement": "°", "state_class": "measurement"})
+    y = float(hass.states.get(OUT).state)
+    assert min(y, 360 - y) < 20

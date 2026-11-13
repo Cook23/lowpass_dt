@@ -500,3 +500,28 @@ async def test_sources_of_two_domains_with_a_unique_id(hass: HomeAssistant, capl
     await setup_lowpass(hass, sensors=[{"source": "sensor.x"}, {"source": "input_number.x", "unique_id": "lp_number_x"}])
     assert len(lowpass_ids(hass)) == 2
     assert "same filtered entity" not in caplog.text
+
+
+async def test_yaml_changed_between_two_starts(hass: HomeAssistant):
+    """The YAML changed while Home Assistant was stopped: the entry takes the new one."""
+    from homeassistant.setup import async_setup_component
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    MockConfigEntry(domain="lowpass_dt", source="import", unique_id="lowpass_dt", data={"sensors": [{"source": "sensor.src", "tau": 30}]}).add_to_hass(hass)
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    assert await async_setup_component(hass, "lowpass_dt", {"lowpass_dt": {"sensors": [{"source": "sensor.src", "tau": 600}]}})
+    await hass.async_block_till_done()
+    assert hass.data["entity_components"]["sensor"].get_entity("sensor.lp_src").cfg.tau == 600
+
+
+async def test_yaml_section_removed(hass: HomeAssistant):
+    """lowpass_dt: removed from the YAML: its entry, and its entities, go."""
+    from homeassistant.setup import async_setup_component
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    MockConfigEntry(domain="lowpass_dt", source="import", unique_id="lowpass_dt", data={"sensors": [{"source": "sensor.src"}]}).add_to_hass(hass)
+    hass.states.async_set("sensor.src", "10", ATTRS)
+    assert await async_setup_component(hass, "lowpass_dt", {})
+    await hass.async_block_till_done()
+    assert hass.config_entries.async_entries("lowpass_dt") == []
+    assert hass.states.get("sensor.lp_src") is None
