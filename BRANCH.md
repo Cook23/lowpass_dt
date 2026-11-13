@@ -1,8 +1,9 @@
 # Branch: v1.4-dev
 
-This branch contains the development version 1.4 (beta).
+This branch contains version 1.4, the current one (out of beta since 1.4.4), and is the
+repository's default branch.
 
-DO NOT assume that code or architecture from main still applies.
+DO NOT assume that code or architecture from v1.3-legacy still applies.
 This branch is allowed to contain breaking architectural changes.
 
 ## The constraint of 1.4: clean code
