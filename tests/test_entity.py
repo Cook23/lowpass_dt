@@ -267,6 +267,37 @@ async def test_silence_value_not_written_when_the_source_resumes_first(hass: Hom
     assert float(writes[0]) == pytest.approx(20.0, abs=0.01)                 # the marker
 
 
+async def test_silence_zero_resumes_from_zero(hass: HomeAssistant, clock, registered):
+    """silence: zero — the device was off: once 0 is shown the filter holds 0, and the
+    output rises from 0 when the source resumes (it went back to the value the source fell
+    silent on first)."""
+    hass.states.async_set(SRC, "0", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": "zero"}])
+    await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
+    await clock.run_until(111, 1500, step=5)
+    assert hass.states.get(OUT).state == "0.0"
+    writes = recorded(hass, OUT)
+    outs = await feed(hass, clock, [(1505, 80)])
+    assert float(writes[0]) < 0.01                       # the marker, at 0
+    assert float(outs[0]) < 1                            # not back to 20
+    await clock.run_until(1506, 1514, step=1)
+    await feed(hass, clock, [(1515, 80.001), (1525, 80.002)])
+    vals = [float(w) for w in writes]
+    assert vals == sorted(vals) and all(v < 15 or v > 25 for v in vals[:2])
+
+
+async def test_silence_unknown_resumes_from_the_last_value(hass: HomeAssistant, clock, registered):
+    """silence: unknown — no value in effect is known during the silence: the output starts
+    again from the value the source fell silent on."""
+    hass.states.async_set(SRC, "0", ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1, "silence": "unknown"}])
+    await feed(hass, clock, [(t, 20 + jitter(t // 10)) for t in range(10, 110, 10)])
+    await clock.run_until(111, 1500, step=5)
+    assert hass.states.get(OUT).state == "unknown"
+    outs = await feed(hass, clock, [(1505, 80)])
+    assert float(outs[0]) == pytest.approx(20.0, abs=0.01)
+
+
 async def test_end_of_silence_marker(hass: HomeAssistant, clock, registered):
     hass.states.async_set(SRC, "0", ATTRS)
     await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 30, "deadband": 0.01, "max_rate_dt": 1}])
@@ -389,7 +420,7 @@ async def test_total_increasing_reset_while_stopped(hass: HomeAssistant, clock):
     assert float(hass.states.get(OUT).state) < 10
 
 
-def restore_filter(hass, state, y, x_prev, attrs=ATTRS):
+def restore_filter(hass, state, y, x_prev, attrs=ATTRS, **low_pass):
     """The entity as saved by a previous run: its state and its filter state."""
     t = dt_util.utcnow().timestamp()
     mock_restore_cache_with_extra_data(
@@ -398,7 +429,7 @@ def restore_filter(hass, state, y, x_prev, attrs=ATTRS):
             (
                 State(OUT, state, attrs),
                 {
-                    "low_pass": {"y": y, "t_prev": t - 600, "x_prev": x_prev, "time_last_pub": t - 600, "circular": None},
+                    "low_pass": {"y": y, "t_prev": t - 600, "x_prev": x_prev, "time_last_pub": t - 600, "circular": None, **low_pass},
                     "ema_source": {"src_mean": y, "src_var": 0.0, "t_sigma_start": t - 7200},
                     "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 600},
                     "ema_dt_output": {"dt_output_mean": 60.0, "dt_output_m2": 3600.0, "decimals": 1},
@@ -420,6 +451,23 @@ async def test_silence_value_kept_across_a_restart(hass: HomeAssistant, clock, r
     await clock.run_until(1, 300, step=1)
     assert writes == []
     assert hass.states.get(OUT).state == state
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    assert ent.core.y == (0.0 if mode == "zero" else 1500.0)      # zero: the filter holds 0
+
+
+@pytest.mark.parametrize("source_state", ["1500", "unavailable"])
+async def test_silence_zero_across_a_restart_still_resumes_from_zero(hass: HomeAssistant, clock, registered, source_state):
+    """silence: zero shown before a restart, the filter holding 0: after the restart the
+    silence goes on (the source on the value it fell silent on, or unavailable), and the
+    output still rises from 0 when the source resumes."""
+    restore_filter(hass, "0.0", 0.0, 0.0, silence_shown=True, silence_source=1500.0)
+    hass.states.async_set(SRC, source_state, ATTRS)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60, "silence": "zero"}])
+    writes = recorded(hass, OUT)
+    await clock.run_until(1, 300, step=1)
+    assert writes == [] and hass.states.get(OUT).state == "0.0"
+    outs = await feed(hass, clock, [(305, 2000)])
+    assert float(outs[0]) < 1
 
 
 async def test_source_unavailable_at_startup_converges_to_its_last_value(hass: HomeAssistant, clock, registered):

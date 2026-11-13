@@ -42,8 +42,10 @@ class Publisher:
         self.dt_output_m2 = None
 
         self.clamped_to_source = False
-        # silence: zero / unknown shown in place of the plateau (kept across a restart)
+        # silence: zero / unknown shown in place of the plateau (kept across a restart), and
+        # the source's value it fell silent on
         self.silence_shown = False
+        self.silence_source = None
         self.output_just_resumed = False
         # total_increasing: the source was reset, the next lower value is accepted once
         self.reset_pending = False
@@ -57,6 +59,22 @@ class Publisher:
         if self.cfg.circular is None:
             return a - b
         return ((a - b + self.cfg.circular / 2) % self.cfg.circular) - self.cfg.circular / 2
+
+    # ------------------------------------------------------------
+    # silence: zero shown — the device is off, the value in effect is 0
+    # ------------------------------------------------------------
+    def holds_zero(self):
+        return (
+            self.silence_shown
+            and self.cfg.silence in ("zero", "0")
+            and self.sensor._attr_state_class not in ("total", "total_increasing")
+        )
+
+    def source_resumed(self):
+        """A real sample: the silence, and what it showed, is over."""
+        self.clamped_to_source = False
+        self.silence_shown = False
+        self.silence_source = None
 
     # ------------------------------------------------------------
     # Convergence detection
@@ -166,7 +184,7 @@ class Publisher:
 
         s = self.sensor
         inj = self.sensor.injector
-        last_src = s._last_source_value
+        last_src = s.held_value
 
         if injected:
             self.output_just_resumed = True
@@ -211,14 +229,19 @@ class Publisher:
         # silence: zero / unknown — the plateau reached, the output shows 0 or nothing (at
         # the next injection only: a source resuming in between never writes it)
         if injected and was_clamped_to_source and self.cfg.silence in ("zero", "0", "unknown"):
-            if self.cfg.silence in ("zero", "0") and s._attr_state_class not in ("total", "total_increasing"):
+            self.silence_source = last_src
+            self.silence_shown = True
+            if self.holds_zero():
                 s._attr_native_value = 0.0
+                # (the device is off: the filter holds 0, and starts from it when the
+                # source resumes — not from the value it fell silent on)
+                self.core.y = 0.0
+                self.core.x_prev = 0.0
             else:
                 s._attr_native_value = None
             inj.stop_injection()
             self.output_just_resumed = True
             self.clamped_to_source = False
-            self.silence_shown = True
         else:
             s._attr_native_value = reported
 

@@ -97,6 +97,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self.publisher = Publisher(self, cfg, self.core)
 
         self._last_source_value = None
+        self._restored_silence_source = None
 
         # circular: period of the restored filter state, whether the current one was
         # auto-detected, and whether the entity is running (see _resolve_auto_circular)
@@ -109,7 +110,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             hass,
             cfg,
             self.core,
-            lambda: self._last_source_value,
+            lambda: self.held_value,
             self.publisher.publish_injected,
             self.publisher.publish_tracked,
         )
@@ -165,6 +166,12 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._attr_device_class = None
         self._attr_native_value = None
         self._attr_extra_state_attributes = {}
+
+    @property
+    def held_value(self):
+        """The value in effect while the source is silent: its last value, or 0 once
+        silence: zero shows it."""
+        return 0.0 if self.publisher.holds_zero() else self._last_source_value
 
     # ------------------------------------------------------------
     # Parse source value (numeric extraction with unit detection)
@@ -340,8 +347,13 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # (unavailable, or not created yet: its last known value is held, as during a
         # silence while running — the output used to stay where it was, never converging)
         startup_sample = self._last_source_value is not None
-        if not startup_sample and self.core.x_prev is not None:
-            self._last_source_value = self.core.x_prev
+        if not startup_sample:
+            # (silence: zero shown, the filter holds 0: the source's own last value is saved apart)
+            last_known = self._restored_silence_source
+            if last_known is None:
+                last_known = self.core.x_prev
+            if last_known is not None:
+                self._last_source_value = last_known
 
         # ---- SILENCE VALUE SHOWN BEFORE THE RESTART ----
         # (silence: zero / unknown, the source still at the value it fell silent on: the
@@ -352,9 +364,18 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 (self.cfg.silence == "unknown" and last_state.state == "unknown")
                 or (self.cfg.silence in ("zero", "0") and last_state.state in ("0", "0.0"))
             )
-        if silence_shown and self._last_source_value == self.core.x_prev:
+        silence_source = self._restored_silence_source
+        if silence_source is None:
+            silence_source = self.core.x_prev      # (saved before 1.4.4: x_prev was that value)
+        if silence_shown and self._last_source_value == silence_source:
             self.publisher.clamped_to_source = True
             self.publisher.silence_shown = True
+            self.publisher.silence_source = silence_source
+            if self.publisher.holds_zero():
+                self.core.y = 0.0
+                self.core.x_prev = 0.0
+            # (the same value as before the restart: not a new sample)
+            startup_sample = False
 
         # ---- HA DOWNTIME (ZOH) ----
         # The source value read at startup is a real sample: the downtime is
@@ -463,6 +484,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         self._restored_circular = lp.get("circular", _MISSING)
         # (None: saved before 1.4.2, told from the restored state below)
         self._restored_silence_shown = lp.get("silence_shown")
+        self._restored_silence_source = lp.get("silence_source")
 
         # EMA filtered signal
         ema = data.get("ema_source", {})
@@ -502,6 +524,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "time_last_pub": self.core.time_last_pub,
                 "circular": self.cfg.circular,
                 "silence_shown": self.publisher.silence_shown,
+                "silence_source": self.publisher.silence_source,
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,
@@ -663,7 +686,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # that published plateau. Tested on the new value itself: with ZOH the
         # filter output only moves toward it at the next sample.
         deadband = self.core.effective_deadband()
-        converged_before_resume = self.publisher._check_convergence(self._last_source_value, deadband)
+        converged_before_resume = self.publisher._check_convergence(self.held_value, deadband)
         departs_from_plateau = self._attr_native_value is not None and abs(self.publisher._diff(x, self._attr_native_value)) >= deadband
         if self.injector.silent and converged_before_resume and departs_from_plateau and self._attr_state_class not in ("total", "total_increasing"):
             marker_dt = self.injector.dt_mean if self.injector.dt_mean is not None else 0.0
@@ -682,7 +705,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         # Update dt stats + stop injector
         self.injector.set_last_source_time(now)
-        self.publisher.clamped_to_source = False
+        self.publisher.source_resumed()
 
         # Update last source value
         self._last_source_value = x
