@@ -51,11 +51,11 @@ def _warn_unknown_keys(where: str, item, allowed: set[str]) -> None:
 
 
 def _is_measurement(state, attribute: str | None = None) -> bool:
-    """A state a pattern may filter: numeric, or not known yet (unknown). For an attribute:
-    the entity has it, as a number."""
+    """A state a pattern may filter: numeric. For an attribute: the entity has it, as a
+    number."""
     if attribute:
         return attribute_value(state.entity_id, attribute, state.attributes)[0] is not None
-    return state.state == "unknown" or parse_state(state.state)[0] is not None
+    return parse_state(state.state)[0] is not None
 
 
 def _pattern_attribute(p: dict) -> str | None:
@@ -228,17 +228,24 @@ async def async_setup_entry_loader(
                     continue
 
                 # -------- KEEP (existence only) --------
-                keep_cfgs[key] = build_cfg(
+                # (a numeric source may report a text for a while — "off" —: its filtered
+                # entity is kept)
+                cfg = build_cfg(
                     p,
                     source=eid,
                     allow_unique_id=False,
                     quiet=True,
                 )
+                keep_cfgs[key] = cfg
 
                 # -------- CREATE (numeric sources only) --------
+                # (or a source not ready yet, unknown, whose filtered entity exists: it was
+                # numeric before — a new one waits for its first number, on the dynamic path)
                 st = hass.states.get(eid)
                 if st is None or not _is_measurement(st, attribute):
-                    continue
+                    registered = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, make_meta(hass, cfg).unique_id)
+                    if st is None or st.state != "unknown" or registered is None:
+                        continue
 
                 local_count += 1
 
@@ -359,10 +366,7 @@ async def async_setup_entry_loader(
                 continue
             seen_keys.add(key)
 
-            if attribute:
-                if not _is_measurement(st, attribute):
-                    continue
-            elif st.state in (None, "unknown", "unavailable") or not _is_measurement(st):
+            if not _is_measurement(st, attribute):
                 continue
 
             # (already filtered: nothing to build at each of its changes)

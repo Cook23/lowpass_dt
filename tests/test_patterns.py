@@ -390,3 +390,34 @@ async def test_pattern_removed_from_the_configuration(hass: HomeAssistant):
     await restart(hass, "run 3")
     assert lowpass_ids(hass) == []
 
+
+
+async def test_source_unknown_at_start_waits_for_a_number(hass: HomeAssistant):
+    """A source not ready at the start (unknown) gets no filtered entity until it has a
+    number: a text sensor not initialised yet used to get one, kept for ever."""
+    eid = register_source(hass, "power_mode")
+    hass.states.async_set(eid, "unknown", {})
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    assert lowpass_ids(hass) == []
+    hass.states.async_set(eid, "eco", {})
+    await hass.async_block_till_done()
+    assert lowpass_ids(hass) == []
+    hass.states.async_set(eid, "12", ATTRS)                     # a number after all
+    await hass.async_block_till_done()
+    assert lowpass_ids(hass) == ["sensor.lp_power_mode"]
+
+
+async def test_source_unknown_at_restart_keeps_its_filtered_entity(hass: HomeAssistant):
+    """A source late at a restart (unknown), already filtered before: its entity is
+    provided at once, as before."""
+    eid = register_source(hass, "power_a")
+    hass.states.async_set(eid, "10", ATTRS)
+    await setup_lowpass(hass, patterns=[{"match": "sensor.power_*"}])
+    await start(hass)
+    hass.states.async_set(eid, "unknown", ATTRS)
+    await restart(hass, "run 2")
+    assert lowpass_ids(hass) == ["sensor.lp_power_a"]
+    assert absent_mark(hass, "sensor.lp_power_a") is None
+    assert hass.states.get("sensor.lp_power_a").state not in ("unavailable", "unknown")
+
