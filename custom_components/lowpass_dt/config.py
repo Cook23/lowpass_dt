@@ -37,13 +37,27 @@ MAX_PATTERN_ENTITIES = 100
 
 
 # ------------------------------------------------------------
-# Small numeric helper
+# Small numeric helpers
 # ------------------------------------------------------------
 def _float_or_default(value, default):
     try:
         return float(value)
     except Exception:
         return default
+
+
+def _number(item: dict, key: str, default, warn, *, positive: bool):
+    """A numeric option: a finite number, > 0 (positive) or >= 0. Absent: the default,
+    quietly. Anything else (text, a boolean, nan, inf, out of range): the default, with
+    a warning."""
+    if key not in item:
+        return default
+    raw = item.get(key)
+    value = None if isinstance(raw, bool) else _float_or_default(raw, None)
+    if value is None or not math.isfinite(value) or value < 0 or (positive and value == 0):
+        warn("Invalid %s=%r, must be a number %s, using default %s", key, raw, "> 0" if positive else ">= 0", default)
+        return default
+    return value
 
 
 # ------------------------------------------------------------
@@ -145,11 +159,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False, quiet: 
     for each of its sources, and checked once, with warnings, when the integration loads."""
     warn = _LOGGER.debug if quiet else _LOGGER.warning
 
-    # tau (must be > 0)
-    tau = _float_or_default(item.get(CONF_TAU, 60.0), 60.0)
-    if tau <= 0:
-        warn("Invalid tau=%r, must be > 0, using default 60.0", tau)
-        tau = 60.0
+    tau = _number(item, CONF_TAU, 60.0, warn, positive=True)
 
     # circular: absent / null / 'none' = automatic (state_class measurement_angle or a
     # unit of exactly '°' gives 360, resolved at runtime), false = never, a number or a
@@ -178,55 +188,26 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False, quiet: 
             warn("Invalid circular=%r, expected false, none, a period > 0 or '2pi', disabling circular mode", raw_circular)
             circular = None
 
-    # deadband (None allowed, but if provided must be >= 0)
-    deadband = item.get(CONF_DEADBAND)
-    if deadband is not None:
-        deadband = _float_or_default(deadband, None)
-        if deadband is None or deadband < 0:
-            warn("Invalid deadband=%r, disabling deadband", item.get(CONF_DEADBAND))
-            deadband = None
+    # deadband: absent (or null) = adaptive
+    deadband = None
+    if item.get(CONF_DEADBAND) is not None:
+        deadband = _number(item, CONF_DEADBAND, None, warn, positive=False)
 
-    # deadband_k_sigma (must be > 0)
-    deadband_k_sigma = _float_or_default(item.get(CONF_DEADBAND_K_SIGMA, 2.0), 2.0)
-    if deadband_k_sigma <= 0:
-        warn("Invalid deadband_k_sigma=%r, must be > 0, using default 2.0", item.get(CONF_DEADBAND_K_SIGMA))
-        deadband_k_sigma = 2.0
+    deadband_k_sigma = _number(item, CONF_DEADBAND_K_SIGMA, 2.0, warn, positive=True)
+    deadband_tau_sigma = _number(item, CONF_DEADBAND_TAU_SIGMA, max(100.0 * tau, 10.0), warn, positive=True)
 
-    # deadband_tau_sigma (must be > 10)
-    default_deadband_tau_sigma = max(100.0 * tau, 10.0)
-    raw_tau_sigma = item.get(CONF_DEADBAND_TAU_SIGMA)
-
-    if raw_tau_sigma is None:
-        deadband_tau_sigma = default_deadband_tau_sigma
-    else:
-        deadband_tau_sigma = _float_or_default(raw_tau_sigma, default_deadband_tau_sigma)
-
-    if deadband_tau_sigma <= 0:
-        warn("Invalid deadband_tau_sigma=%r, must be > 0, using derived default", item.get(CONF_DEADBAND_TAU_SIGMA))
-        deadband_tau_sigma = default_deadband_tau_sigma
-
-    # rounding
+    # rounding: a whole number of decimals (2, or 2.0; negative: tens, hundreds…)
+    rounding = None
     if CONF_ROUND in item:
-        try:
-            rounding = int(item.get(CONF_ROUND))
-        except Exception:
-            warn("Invalid rounding=%r, using dynamic rounding", item.get(CONF_ROUND))
-            rounding = None
-    else:
-        rounding = None
+        raw_round = item.get(CONF_ROUND)
+        value = None if isinstance(raw_round, bool) else _float_or_default(raw_round, None)
+        if value is None or not math.isfinite(value) or value != int(value):
+            warn("Invalid round=%r, must be a whole number, using dynamic rounding", raw_round)
+        else:
+            rounding = int(value)
 
-    # max_rate_dt (must be >= 0)
-    max_rate_dt = _float_or_default(item.get(CONF_MAX_RATE_DT, 10.0), 10.0)
-    # min_rate_dt (must be >= 0)
-    min_rate_dt = _float_or_default(item.get(CONF_MIN_RATE_DT, 3600.0), 3600.0)
-
-    if max_rate_dt < 0:
-        warn("Invalid max_rate_dt=%r, must be >= 0, using default 10.0", item.get(CONF_MAX_RATE_DT))
-        max_rate_dt = 10.0
-
-    if min_rate_dt < 0:
-        warn("Invalid min_rate_dt=%r, must be >= 0, using default 3600.0", item.get(CONF_MIN_RATE_DT))
-        min_rate_dt = 3600.0
+    max_rate_dt = _number(item, CONF_MAX_RATE_DT, 10.0, warn, positive=False)
+    min_rate_dt = _number(item, CONF_MIN_RATE_DT, 3600.0, warn, positive=False)
 
     # Only one of the two given, at odds with the other's default: the other follows it
     # (min_rate_dt: 2 alone asks for a write every 2 s at least, not for the defaults)
@@ -255,7 +236,9 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False, quiet: 
 
     # unique_id (sensors/source only)
     unique_id: str | None = None
-    if allow_unique_id and (CONF_UNIQUE_ID in item):
+    if CONF_UNIQUE_ID in item and not allow_unique_id:
+        warn("Ignoring unique_id=%r for pattern-based sensor %r, use explicit sensor config", item.get(CONF_UNIQUE_ID), source)
+    elif CONF_UNIQUE_ID in item:
         raw_uid = item.get(CONF_UNIQUE_ID)
         if isinstance(raw_uid, str) and raw_uid.strip():
             unique_id = raw_uid.strip()
@@ -291,7 +274,7 @@ def build_cfg(item: dict, *, source: str, allow_unique_id: bool = False, quiet: 
         if raw_silence in ("last", "none", "0", "zero", "unknown"):
             silence = raw_silence
         else:
-            warn("Invalid silence=%r, must be None/Last/Zero/Unknown, using default None", item.get(CONF_SILENCE))
+            warn("Invalid silence=%r, must be last, zero or unknown, using default last", item.get(CONF_SILENCE))
             silence = None
 
     # attribute (a non-empty string), or written after the entity_id as in
