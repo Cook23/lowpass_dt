@@ -6,6 +6,12 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
+## v1.4.5
+
+### Changed — an angle averaged as Home Assistant does
+
+- **The mean of an angle is the direction of the mean of unit vectors**, as Home Assistant's statistics average a `measurement_angle` and as history-explorer-card does: each value a unit vector, the filter's exponential mean taken on those vectors, the output their direction. It used to be the mean along the circle, by the shortest-way differences. The two agree when the values are close together; they differ when they are spread (a veering wind): 0° then 120° for a quarter of the weight gives 19.1°, no longer 30°. The mean the adaptive deadband's σ is measured around follows the same rule; the vectors are kept across a restart.
+
 ## v1.4.4
 
 The 1.4 line is no longer a beta: it is the current version. The 1.3 line stays on the branch `v1.3-legacy`, for fixes only.

@@ -187,3 +187,16 @@ Difference: the device_class / state_class derivation exists only here (the card
 need them).
 
 Introduced in lowpass_dt v1.4.1 / card v1.2.13.
+
+### 4. The mean of a circular value — Home Assistant's rule, set by the user (November 2026)
+
+| here | card (1.2) |
+|---|---|
+| `filter.py` `_toward_on_circle` (the output, and the mean σ is taken around) | `src/history-stats.js` `circularMean` |
+
+Home Assistant's statistics (`sensor/recorder.py` `_time_weighted_circular_mean`): each
+value a unit vector, weighted by how long it was in force, the mean the direction (`atan2`)
+of their sum. Here the filter's exponential weighting on those vectors (an EMA of cos and
+sin, `y_vec`, `mean_vec`, saved across restarts); the card, a time-weighted mean over a group.
+σ stays the shortest-way differences to the mean. It replaced the mean along the circle
+(`m` with Σ w · wrap(x − m) = 0) in lowpass_dt v1.4.5 / card v1.2.91.
