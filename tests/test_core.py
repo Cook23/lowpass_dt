@@ -130,3 +130,28 @@ def test_synthetic_update_pulls_towards_last_value():
     run(c, [(0, 0.0), (10, 100.0)])
     c.update_synthetic(100.0, 20.0)
     assert c.y == pytest.approx(100.0 * (1 - math.exp(-1)))
+
+
+def test_circular_mean_is_home_assistant_s_with_the_filter_s_weights():
+    """The output is exactly Home Assistant's own weighted circular mean (the one of its
+    measurement_angle statistics) of the values, each weighted as the filter weighs it:
+    the time it was in force, faded by exp(-age / tau)."""
+    import random
+
+    statistics = pytest.importorskip("homeassistant.components.recorder.statistics")
+    if not hasattr(statistics, "weighted_circular_mean"):
+        pytest.skip("no circular mean in this Home Assistant")
+    rng = random.Random(1)
+    tau = 60.0
+    c = core(tau=tau, circular=360)
+    samples, t = [], 0.0
+    for _ in range(200):
+        samples.append((t, rng.uniform(0, 360)))        # values all around the circle
+        t += rng.uniform(1, 30)
+    run(c, samples)
+    end = samples[-1][0]
+    weighted = [(samples[0][1], math.exp(-(end - samples[0][0]) / tau))]
+    for (t0, x0), (t1, _) in zip(samples, samples[1:]):
+        weighted.append((x0, math.exp(-(end - t1) / tau) - math.exp(-(end - t0) / tau)))
+    mean, _ = statistics.weighted_circular_mean(weighted)
+    assert ((c.y - mean + 180) % 360) - 180 == pytest.approx(0.0, abs=1e-9)
