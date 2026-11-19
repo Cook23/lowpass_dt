@@ -93,10 +93,10 @@ Tests: see `tests/README.md`.
 ## Shared logic with history-explorer-card
 
 [Cook23/history-explorer-card](https://github.com/Cook23/history-explorer-card) (a Lovelace
-card, JavaScript) is a different project by the same author, but it reuses two pieces of
-logic from this integration and documents them as "the same as lowpass_dt". A change to
-either piece here must be mirrored there (and vice versa), or the docs on both sides become
-wrong. The card is worked on in its own Claude session; tell the user when a change here
+card, JavaScript) is a different project by the same author, and the two share the four
+pieces of logic below (the `circular` values, the silence detection, the attribute units,
+the mean of an angle). A change to any of them here must be mirrored there (and vice versa),
+or the docs on both sides become wrong. The card is worked on in its own Claude session; tell the user when a change here
 needs a matching change in the card.
 
 Rule set by the user: each session manages its own repository's code. A session may write
