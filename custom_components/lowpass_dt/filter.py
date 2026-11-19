@@ -23,13 +23,16 @@ class LowpassCore:
         # at runtime (an angle detected, or turned off for a total_increasing source)
         self.period = cfg.circular
 
-        # filter state
+        # filter state (circular: y is the direction of y_vec, the mean of unit vectors;
+        # a new y sets it again, as the unit vector of y)
         self.y = None
+        self.y_vec = None
         self.t_prev = None
         self.x_prev = None
 
         # stats (always computed for transparency)
         self.src_mean = None
+        self.mean_vec = None
         self.src_var = None
         self.src_sigma = None
         self.src_m2 = None
@@ -51,6 +54,40 @@ class LowpassCore:
 
     def set_period(self, period):
         self.period = period
+
+    @property
+    def y(self):
+        return self._y
+
+    @y.setter
+    def y(self, value):
+        self._y = value
+        self.y_vec = None
+
+    @property
+    def src_mean(self):
+        return self._src_mean
+
+    @src_mean.setter
+    def src_mean(self, value):
+        self._src_mean = value
+        self.mean_vec = None
+
+    # ------------------------------------------------------------
+    # A circular mean moved toward a value, by weight alpha: as Home Assistant's statistics
+    # average an angle (and history-explorer-card), each value a unit vector, the mean the
+    # direction of their weighted sum — here an exponential weighting, the filter's.
+    # ------------------------------------------------------------
+    def _toward_on_circle(self, vec, mean, target, alpha):
+        k = 2 * math.pi / self.period
+        if vec is None:
+            vec = (math.cos(k * mean), math.sin(k * mean))
+        c = vec[0] + alpha * (math.cos(k * target) - vec[0])
+        s = vec[1] + alpha * (math.sin(k * target) - vec[1])
+        if c == 0.0 and s == 0.0:
+            # (vectors cancelling exactly: no direction, the mean stays where it was)
+            return mean, (c, s)
+        return (math.atan2(s, c) / k) % self.period, (c, s)
 
     # ------------------------------------------------------------
     # Update filter from real source value
@@ -83,9 +120,10 @@ class LowpassCore:
 
         # Zero-order hold (ZOH): dt[n] is the duration during which x_prev
         # (not the newly arrived x) was the actual value of the signal.
-        self.y = self.y + alpha * self.diff(x_prev, self.y)
-        if self.period is not None:
-            self.y %= self.period
+        if self.period is None:
+            self._y = self._y + alpha * (x_prev - self._y)
+        else:
+            self._y, self.y_vec = self._toward_on_circle(self.y_vec, self._y, x_prev, alpha)
 
         self.t_prev = now
         self.x_prev = x
@@ -113,8 +151,9 @@ class LowpassCore:
             self.src_m2 = self.y * self.y
             self.src_var = 0.0
         elif self.period is not None:
-            err = self.diff(self.y, self.src_mean)
-            self.src_mean = (self.src_mean + beta * err) % self.period
+            # (σ: the output's shortest-way differences to the mean)
+            err = self.diff(self._y, self._src_mean)
+            self._src_mean, self.mean_vec = self._toward_on_circle(self.mean_vec, self._src_mean, self._y, beta)
             self.src_var = max((1 - beta) * self.src_var + beta * err * err, 0.0)
         else:
             self.src_m2 = self.src_var + self.src_mean ** 2
@@ -140,9 +179,10 @@ class LowpassCore:
         dt = max(0.0, now - t_prev)
         alpha = _alpha(dt, tau)
 
-        self.y = self.y + alpha * self.diff(last_source_value, self.y)
-        if self.period is not None:
-            self.y %= self.period
+        if self.period is None:
+            self._y = self._y + alpha * (last_source_value - self._y)
+        else:
+            self._y, self.y_vec = self._toward_on_circle(self.y_vec, self._y, last_source_value, alpha)
 
         self.t_prev = now
 

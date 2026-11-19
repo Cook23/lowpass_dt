@@ -77,6 +77,36 @@ def test_circular_mean_crosses_north():
     assert 0 <= c.y < 360
 
 
+def test_circular_mean_is_the_vector_mean_as_home_assistant():
+    """An angle is averaged as Home Assistant's statistics average it: each value a unit
+    vector, the mean the direction of their (time-)weighted sum. 0° held, then 120° for
+    a weight of a quarter: atan2(¼ sin 120°, ¾ + ¼ cos 120°) = 19.1°, not 30° (the
+    weighted mean along the arc)."""
+    tau = 60.0
+    dt = -tau * math.log(0.75)                       # alpha = 1 - exp(-dt / tau) = 0.25
+    c = core(tau=tau, circular=360)
+    run(c, [(0, 0.0), (1e-9, 120.0), (dt, 120.0)])
+    expected = math.degrees(math.atan2(0.25 * math.sin(math.radians(120)), 0.75 + 0.25 * math.cos(math.radians(120))))
+    assert c.y == pytest.approx(expected, abs=1e-6)
+
+
+def test_circular_injected_steps_do_not_change_the_output():
+    """Circular too: computing the output more often gives the same value."""
+    a, b = core(tau=30, circular=360), core(tau=30, circular=360)
+    run(a, [(0, 350.0), (10, 100.0), (200, 100.0)])
+    run(b, [(0, 350.0), (10, 100.0)])
+    for t in range(20, 200, 7):
+        b.update_synthetic(100.0, float(t))
+    b.update_from_source(100.0, 200.0)
+    assert b.y == pytest.approx(a.y, abs=1e-9)
+
+
+def test_circular_output_reaches_the_value_held():
+    c = core(tau=10, circular=360)
+    run(c, [(0, 350.0), (1e-9, 20.0)] + [(10.0 * k, 20.0) for k in range(1, 40)])
+    assert c.y == pytest.approx(20.0, abs=1e-6)
+
+
 def test_without_circular_the_same_signal_averages_to_180():
     c = core(tau=200, circular=False)
     run(c, [(0, 350.0)] + [(10 * k, 10.0 if k % 2 else 350.0) for k in range(1, 400)])

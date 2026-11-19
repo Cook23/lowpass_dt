@@ -497,6 +497,33 @@ async def test_angle_detected_from_degree_unit(hass: HomeAssistant, clock):
     assert 0 <= y < 360
 
 
+async def test_angle_vector_saved_and_restored(hass: HomeAssistant, clock):
+    """The mean's vector of an angle is saved, so that a restart goes on with it (not with
+    a unit vector taken from the rounded state)."""
+    t = dt_util.utcnow().timestamp()
+    attrs = {"unit_of_measurement": "°", "state_class": "measurement"}
+    mock_restore_cache_with_extra_data(
+        hass,
+        [
+            (
+                State(OUT, "19.1", attrs),
+                {
+                    "low_pass": {"y": 19.1, "t_prev": t - 5, "x_prev": 120.0, "time_last_pub": t - 5, "circular": 360.0, "y_vec": [0.625, 0.2165]},
+                    "ema_source": {"src_mean": 19.1, "src_var": 0.0, "t_sigma_start": t - 10000, "mean_vec": [0.9, 0.3]},
+                    "ema_dt_source": {"dt_mean": 10.0, "dt_m2": 100.0, "t_last_source": t - 5},
+                    "ema_dt_output": {"dt_output_mean": 10.0, "dt_output_m2": 100.0, "decimals": 1},
+                },
+            )
+        ],
+    )
+    hass.states.async_set(SRC, "120", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    saved = ent.extra_restore_state_data.as_dict()
+    assert saved["low_pass"]["y_vec"] is not None and saved["ema_source"]["mean_vec"] is not None
+    assert abs(ent.core.y_vec[0] - 0.625) < 0.1          # gone on from the saved vector
+
+
 async def test_temperature_unit_is_not_an_angle(hass: HomeAssistant, clock):
     attrs = {"unit_of_measurement": "°C", "state_class": "measurement"}
     hass.states.async_set(SRC, "350", attrs)
