@@ -481,6 +481,8 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         core.y = lp.get("y")
         core.t_prev = lp.get("t_prev")
         core.x_prev = lp.get("x_prev")
+        # (circular: the mean's vector; absent before 1.4.5, taken again from y)
+        core.y_vec = lp.get("y_vec")
         pub.time_last_pub = lp.get("time_last_pub")
         # (period the saved state was computed with; key absent before v1.3.17)
         self._restored_circular = lp.get("circular", _MISSING)
@@ -491,6 +493,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # EMA filtered signal
         ema = data.get("ema_source", {})
         core.src_mean = ema.get("src_mean")
+        core.mean_vec = ema.get("mean_vec")
         raw_var = ema.get("src_var")
         core.src_var = max(float(raw_var), 0.0) if raw_var is not None else 0.0
         core.src_sigma = core.src_var ** 0.5
@@ -517,6 +520,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
                 "y": self.core.y,
                 "t_prev": self.core.t_prev,
                 "x_prev": self.core.x_prev,
+                "y_vec": self.core.y_vec,
                 "time_last_pub": self.publisher.time_last_pub,
                 "circular": self.core.period,
                 "silence_shown": self.publisher.silence_shown,
@@ -524,6 +528,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
             },
             "ema_source": {
                 "src_mean": self.core.src_mean,
+                "mean_vec": self.core.mean_vec,
                 "src_var": self.core.src_var,
                 "t_sigma_start": self.core.t_sigma_start,
             },

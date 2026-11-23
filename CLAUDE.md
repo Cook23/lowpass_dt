@@ -93,10 +93,10 @@ Tests: see `tests/README.md`.
 ## Shared logic with history-explorer-card
 
 [Cook23/history-explorer-card](https://github.com/Cook23/history-explorer-card) (a Lovelace
-card, JavaScript) is a different project by the same author, but it reuses two pieces of
-logic from this integration and documents them as "the same as lowpass_dt". A change to
-either piece here must be mirrored there (and vice versa), or the docs on both sides become
-wrong. The card is worked on in its own Claude session; tell the user when a change here
+card, JavaScript) is a different project by the same author, and the two share the four
+pieces of logic below (the `circular` values, the silence detection, the attribute units,
+the mean of an angle). A change to any of them here must be mirrored there (and vice versa),
+or the docs on both sides become wrong. The card is worked on in its own Claude session; tell the user when a change here
 needs a matching change in the card.
 
 Rule set by the user: each session manages its own repository's code. A session may write
@@ -187,3 +187,16 @@ Difference: the device_class / state_class derivation exists only here (the card
 need them).
 
 Introduced in lowpass_dt v1.4.1 / card v1.2.13.
+
+### 4. The mean of a circular value — Home Assistant's rule, set by the user (November 2026)
+
+| here | card (1.2) |
+|---|---|
+| `filter.py` `_toward_on_circle` (the output, and the mean σ is taken around) | `src/history-stats.js` `circularMean` |
+
+Home Assistant's statistics (`sensor/recorder.py` `_time_weighted_circular_mean`): each
+value a unit vector, weighted by how long it was in force, the mean the direction (`atan2`)
+of their sum. Here the filter's exponential weighting on those vectors (an EMA of cos and
+sin, `y_vec`, `mean_vec`, saved across restarts); the card, a time-weighted mean over a group.
+σ stays the shortest-way differences to the mean. It replaced the mean along the circle
+(`m` with Σ w · wrap(x − m) = 0) in lowpass_dt v1.4.5 / card v1.2.91.
