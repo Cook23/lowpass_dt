@@ -42,6 +42,13 @@ _MEASUREMENT_DEVICE_CLASSES = (
 )
 _TOTAL_DEVICE_CLASSES = ("energy", "gas", "water")
 
+# total_increasing: a drop of more than this share of the value before is a reset of the
+# meter — Home Assistant's rule for its statistics (sensor/recorder.py, reset_detected) —
+_RESET_SHARE = 0.1
+# ...plus this many steps of the output's rounding, at most _RESET_MARGIN_MAX (source's unit)
+_RESET_MARGIN_STEPS = 10
+_RESET_MARGIN_MAX = 1.0
+
 
 # ------------------------------------------------------------
 # Setup entry (wrapper): delegated to loader.py
@@ -335,12 +342,7 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         # ---- total_increasing reset while Home Assistant was stopped ----
         # (the same rule as at a sample: a strong drop is a reset — without it, every value
         # below the restored total would be held back until the meter passes it again)
-        if (
-            self._attr_state_class == "total_increasing"
-            and self._last_source_value is not None
-            and self.core.x_prev is not None
-            and self._last_source_value < self.core.x_prev * 0.5
-        ):
+        if self._last_source_value is not None and self._is_reset(self._last_source_value, self.core.x_prev):
             self.core.y = self._last_source_value
             self.core.x_prev = self._last_source_value
             self.publisher.reset_pending = True
@@ -637,6 +639,24 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
         )
 
     # ------------------------------------------------------------
+    # total_increasing: a reset of the meter
+    # ------------------------------------------------------------
+    def _is_reset(self, x, previous) -> bool:
+        """A meter reset: x below the source's value before, or the value published, by more
+        than 10 % of it (of its size: a negative value too) plus min(10 steps of the output's
+        rounding, 1). (The value published too: a source that went down in several smaller
+        steps would otherwise leave the output held above it for good. The steps: a value
+        near zero written with more decimals than before — 0.2 for 0.16, then 0.17 — is not
+        a reset.)"""
+        if self._attr_state_class != "total_increasing":
+            return False
+        margin = min(_RESET_MARGIN_STEPS * self.publisher.output_step(), _RESET_MARGIN_MAX)
+        return any(
+            ref is not None and ref - x > _RESET_SHARE * abs(ref) + margin
+            for ref in (previous, self._attr_native_value)
+        )
+
+    # ------------------------------------------------------------
     # Handle real source updates
     # ------------------------------------------------------------
     @callback
@@ -662,9 +682,9 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
 
         now = dt_util.utcnow().timestamp()
 
-        # RESET detection (strong drop only)
+        # RESET detection
         prev_src = self._last_source_value
-        if (self._attr_state_class == "total_increasing" and prev_src is not None and x < prev_src * 0.5 ):
+        if self._is_reset(x, prev_src):
             _LOGGER.debug("total_increasing RESET detected for source %s dropped from %.6f to %.6f", self.entity_id, prev_src, x)
 
             # Hard reset of filter state

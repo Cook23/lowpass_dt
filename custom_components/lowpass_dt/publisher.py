@@ -74,6 +74,16 @@ class Publisher:
         self.silence_shown = False
         self.silence_source = None
 
+    def output_step(self):
+        """The step of the output's rounding: round, or the decimals the deadband gives."""
+        if self.cfg.rounding is not None:
+            decimals = self.cfg.rounding
+        elif self.decimals is not None:
+            decimals = self.decimals
+        else:
+            decimals = _update_decimals(self.core.effective_deadband(), None)
+        return 10.0 ** -decimals
+
     # ------------------------------------------------------------
     # Convergence detection
     # ------------------------------------------------------------

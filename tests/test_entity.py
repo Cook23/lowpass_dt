@@ -552,6 +552,95 @@ async def test_total_increasing_reset_is_accepted(hass: HomeAssistant, clock):
     assert float(hass.states.get(OUT).state) < 10
 
 
+async def test_total_increasing_drop_of_more_than_10_percent_is_a_reset(hass: HomeAssistant, clock):
+    """Home Assistant's rule: a drop below 90 % of the value before is a reset of the meter
+    (it took a drop below half)."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "1000", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.01, "max_rate_dt": 1}])
+    await feed(hass, clock, [(10, 1010), (20, 1020), (30, 700), (40, 705), (50, 710)], attrs)
+    assert float(hass.states.get(OUT).state) < 720
+
+
+@pytest.mark.parametrize("before, after", [("0.2", "0.17"), ("1.3", "1.27"), ("0.3", "0.27"), ("0.25", "0.2")])
+async def test_total_increasing_change_of_precision_is_not_a_reset(hass: HomeAssistant, clock, before, after):
+    """Near zero, a value written with fewer decimals, then more (0.2 for 0.16, then 0.17):
+    not a reset — a reset is a drop of more than 10 % plus 10 steps of the output's
+    rounding (here 2 decimals: 0.1). The output is held, as for any dip, until the meter
+    passes it again."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, before, attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.05, "max_rate_dt": 1}])
+    await feed(hass, clock, [(10, after), (20, after)], attrs)
+    assert float(hass.states.get(OUT).state) == pytest.approx(float(before))
+
+
+@pytest.mark.parametrize("before, after", [("0.3", "0"), ("2902.06", "0.5"), ("13352.0", "2902.06"), ("5", "3")])
+async def test_total_increasing_real_reset(hass: HomeAssistant, clock, before, after):
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, before, attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.05, "max_rate_dt": 1}])
+    await feed(hass, clock, [(10, after), (20, after)], attrs)
+    assert float(hass.states.get(OUT).state) == pytest.approx(float(after), abs=0.01)
+
+
+async def test_total_increasing_reset_margin_at_most_one_unit(hass: HomeAssistant, clock):
+    """round: -1 (tens): 10 steps would be 100; the margin is at most 1 of the source's
+    unit, so a daily meter going back to 0 from 6 is still a reset."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "6", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.05, "max_rate_dt": 1, "round": -1}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(10, "0")], attrs)
+    assert ent.core.y == pytest.approx(0.0, abs=0.01)
+
+
+@pytest.mark.parametrize(
+    "before, after, reset",
+    [
+        ("-5", "-5.2", False),       # a small drop: held
+        ("-5", "-8", True),          # more than 10 % of 5 plus the margin
+        ("-5", "-4", False),         # a rise
+        ("0.5", "-3", True),         # past zero
+    ],
+)
+async def test_total_increasing_reset_with_negative_values(hass: HomeAssistant, clock, before, after, reset):
+    """A drop measured against the size of the value before: 90 % of a negative value is
+    above it, which would take a small drop for a reset."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, before, attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.05, "max_rate_dt": 1}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(10, after)], attrs)
+    if reset:
+        assert ent.core.y == pytest.approx(float(after))
+    else:
+        assert float(hass.states.get(OUT).state) >= float(before)
+
+
+async def test_total_increasing_drop_in_steps_is_a_reset(hass: HomeAssistant, clock):
+    """A source going down in steps of 5 %, none of them a reset against the value before
+    it, is one against the value published: the output follows it down (it stayed above
+    for good)."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "13352", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.01, "max_rate_dt": 1}])
+    steps = [round(13352 * 0.95 ** k, 1) for k in range(31)] + [2902, 2903, 2904, 2905]
+    await feed(hass, clock, [(10 * (k + 1), v) for k, v in enumerate(steps)], attrs)
+    assert float(hass.states.get(OUT).state) < 3000
+
+
+async def test_total_increasing_held_above_its_source_is_freed_at_a_restart(hass: HomeAssistant, clock, registered):
+    """Saved held above its source (13352 published, the source at 2902): the next start
+    sees a reset against the published value."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    restore_filter(hass, "13352.0", 2902.0, 2902.0, attrs=attrs)
+    hass.states.async_set(SRC, "2902.06", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await feed(hass, clock, [(10 * k, 2902.06 + 0.01 * k) for k in range(1, 30)], attrs)
+    assert float(hass.states.get(OUT).state) < 3000
+
+
 # ------------------------------------------------------------------ restart
 
 
