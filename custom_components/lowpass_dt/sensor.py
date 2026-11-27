@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -46,12 +45,8 @@ _TOTAL_DEVICE_CLASSES = ("energy", "gas", "water")
 # total_increasing: a drop below this share of the value before is a reset of the meter —
 # Home Assistant's rule for its statistics (sensor/recorder.py, reset_detected)
 _RESET_RATIO = 0.9
-
-
-def _resolution(value: float) -> float:
-    """The step of a value's last digit, as written: 1.3 → 0.1, 2902.06 → 0.01."""
-    exponent = Decimal(repr(float(value))).as_tuple().exponent
-    return 10.0 ** exponent if isinstance(exponent, int) else 0.0
+# ...by more than this many steps of the output's rounding
+_RESET_MARGIN_STEPS = 10
 
 
 # ------------------------------------------------------------
@@ -646,17 +641,15 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # total_increasing: a reset of the meter
     # ------------------------------------------------------------
     def _is_reset(self, x, previous) -> bool:
-        """x below 90 % of the source's value before, or of the value published, less one
-        step of that value's last digit: a meter reset. (The published value too: a source
-        that went down in several steps, each smaller, would otherwise leave the output held
-        above it for good. The step: a value written with fewer decimals — 0.2 for 0.16 —
-        then with more, 0.17, is not a reset.)"""
+        """A meter reset: x below the source's value before, or the value published, by more
+        than 10 % of it plus 10 steps of the output's rounding. (The value published too: a
+        source that went down in several smaller steps would otherwise leave the output held
+        above it for good. The 10 steps: a value near zero written with more decimals than
+        before — 0.2 for 0.16, then 0.17 — is not a reset.)"""
         if self._attr_state_class != "total_increasing":
             return False
-        return any(
-            ref is not None and x < _RESET_RATIO * ref - _resolution(ref)
-            for ref in (previous, self._attr_native_value)
-        )
+        margin = _RESET_MARGIN_STEPS * self.publisher.output_step()
+        return any(ref is not None and x < _RESET_RATIO * ref - margin for ref in (previous, self._attr_native_value))
 
     # ------------------------------------------------------------
     # Handle real source updates
