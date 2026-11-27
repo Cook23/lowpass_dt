@@ -58,8 +58,9 @@ Tests: see `tests/README.md`.
   - HACS minimum: Home Assistant 2025.1 (the oldest version tested).
 - Decided by the user (November 2026): a `total_increasing` reset is Home Assistant's rule
   (`sensor/recorder.py` `reset_detected`, a value below 90 % of the one before), against the
-  source's value before and against the value published (a drop in steps). A smaller dip
-  is held, the output never goes down otherwise.
+  source's value before and against the value published (a drop in steps), less one step
+  of that value's last digit (0.2 then 0.17, a change of precision, is not a reset). A
+  smaller dip is held, the output never goes down otherwise.
 
 ## Versions (same rules as history-explorer-card) — set by the user, not negotiable
 
