@@ -552,6 +552,39 @@ async def test_total_increasing_reset_is_accepted(hass: HomeAssistant, clock):
     assert float(hass.states.get(OUT).state) < 10
 
 
+async def test_total_increasing_drop_of_more_than_10_percent_is_a_reset(hass: HomeAssistant, clock):
+    """Home Assistant's rule: a drop below 90 % of the value before is a reset of the meter
+    (it took a drop below half)."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "1000", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.01, "max_rate_dt": 1}])
+    await feed(hass, clock, [(10, 1010), (20, 1020), (30, 700), (40, 705), (50, 710)], attrs)
+    assert float(hass.states.get(OUT).state) < 720
+
+
+async def test_total_increasing_drop_in_steps_is_a_reset(hass: HomeAssistant, clock):
+    """A source going down in steps of 5 %, none of them a reset against the value before
+    it, is one against the value published: the output follows it down (it stayed above
+    for good)."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "13352", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.01, "max_rate_dt": 1}])
+    steps = [round(13352 * 0.95 ** k, 1) for k in range(31)] + [2902, 2903, 2904, 2905]
+    await feed(hass, clock, [(10 * (k + 1), v) for k, v in enumerate(steps)], attrs)
+    assert float(hass.states.get(OUT).state) < 3000
+
+
+async def test_total_increasing_held_above_its_source_is_freed_at_a_restart(hass: HomeAssistant, clock, registered):
+    """Saved held above its source (13352 published, the source at 2902): the next start
+    sees a reset against the published value."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    restore_filter(hass, "13352.0", 2902.0, 2902.0, attrs=attrs)
+    hass.states.async_set(SRC, "2902.06", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 60}])
+    await feed(hass, clock, [(10 * k, 2902.06 + 0.01 * k) for k in range(1, 30)], attrs)
+    assert float(hass.states.get(OUT).state) < 3000
+
+
 # ------------------------------------------------------------------ restart
 
 
