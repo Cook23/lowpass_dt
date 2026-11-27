@@ -42,11 +42,12 @@ _MEASUREMENT_DEVICE_CLASSES = (
 )
 _TOTAL_DEVICE_CLASSES = ("energy", "gas", "water")
 
-# total_increasing: a drop below this share of the value before is a reset of the meter —
-# Home Assistant's rule for its statistics (sensor/recorder.py, reset_detected)
-_RESET_RATIO = 0.9
-# ...by more than this many steps of the output's rounding
+# total_increasing: a drop of more than this share of the value before is a reset of the
+# meter — Home Assistant's rule for its statistics (sensor/recorder.py, reset_detected) —
+_RESET_SHARE = 0.1
+# ...plus this many steps of the output's rounding, at most _RESET_MARGIN_MAX (source's unit)
 _RESET_MARGIN_STEPS = 10
+_RESET_MARGIN_MAX = 1.0
 
 
 # ------------------------------------------------------------
@@ -642,14 +643,18 @@ class LowpassDtSensor(SensorEntity, RestoreEntity):
     # ------------------------------------------------------------
     def _is_reset(self, x, previous) -> bool:
         """A meter reset: x below the source's value before, or the value published, by more
-        than 10 % of it plus 10 steps of the output's rounding. (The value published too: a
-        source that went down in several smaller steps would otherwise leave the output held
-        above it for good. The 10 steps: a value near zero written with more decimals than
-        before — 0.2 for 0.16, then 0.17 — is not a reset.)"""
+        than 10 % of it (of its size: a negative value too) plus min(10 steps of the output's
+        rounding, 1). (The value published too: a source that went down in several smaller
+        steps would otherwise leave the output held above it for good. The steps: a value
+        near zero written with more decimals than before — 0.2 for 0.16, then 0.17 — is not
+        a reset.)"""
         if self._attr_state_class != "total_increasing":
             return False
-        margin = _RESET_MARGIN_STEPS * self.publisher.output_step()
-        return any(ref is not None and x < _RESET_RATIO * ref - margin for ref in (previous, self._attr_native_value))
+        margin = min(_RESET_MARGIN_STEPS * self.publisher.output_step(), _RESET_MARGIN_MAX)
+        return any(
+            ref is not None and ref - x > _RESET_SHARE * abs(ref) + margin
+            for ref in (previous, self._attr_native_value)
+        )
 
     # ------------------------------------------------------------
     # Handle real source updates

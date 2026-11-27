@@ -584,6 +584,40 @@ async def test_total_increasing_real_reset(hass: HomeAssistant, clock, before, a
     assert float(hass.states.get(OUT).state) == pytest.approx(float(after), abs=0.01)
 
 
+async def test_total_increasing_reset_margin_at_most_one_unit(hass: HomeAssistant, clock):
+    """round: -1 (tens): 10 steps would be 100; the margin is at most 1 of the source's
+    unit, so a daily meter going back to 0 from 6 is still a reset."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, "6", attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.05, "max_rate_dt": 1, "round": -1}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(10, "0")], attrs)
+    assert ent.core.y == pytest.approx(0.0, abs=0.01)
+
+
+@pytest.mark.parametrize(
+    "before, after, reset",
+    [
+        ("-5", "-5.2", False),       # a small drop: held
+        ("-5", "-8", True),          # more than 10 % of 5 plus the margin
+        ("-5", "-4", False),         # a rise
+        ("0.5", "-3", True),         # past zero
+    ],
+)
+async def test_total_increasing_reset_with_negative_values(hass: HomeAssistant, clock, before, after, reset):
+    """A drop measured against the size of the value before: 90 % of a negative value is
+    above it, which would take a small drop for a reset."""
+    attrs = {"unit_of_measurement": "kWh", "state_class": "total_increasing"}
+    hass.states.async_set(SRC, before, attrs)
+    await setup_lowpass(hass, sensors=[{"source": SRC, "tau": 10, "deadband": 0.05, "max_rate_dt": 1}])
+    ent = hass.data["entity_components"]["sensor"].get_entity(OUT)
+    await feed(hass, clock, [(10, after)], attrs)
+    if reset:
+        assert ent.core.y == pytest.approx(float(after))
+    else:
+        assert float(hass.states.get(OUT).state) >= float(before)
+
+
 async def test_total_increasing_drop_in_steps_is_a_reset(hass: HomeAssistant, clock):
     """A source going down in steps of 5 %, none of them a reset against the value before
     it, is one against the value published: the output follows it down (it stayed above
