@@ -56,6 +56,10 @@ Tests: see `tests/README.md`.
     attribute changed, or `force_update`); for an attribute, only a new value of it. Kept.
   - The automatic deadband never goes under 0.001 in the source's unit. Kept, documented.
   - HACS minimum: Home Assistant 2025.1 (the oldest version tested).
+- Decided by the user (November 2026): a `total_increasing` reset is Home Assistant's rule
+  (`sensor/recorder.py` `reset_detected`, a value below 90 % of the one before), against the
+  source's value before and against the value published (a drop in steps). A smaller dip
+  is held, the output never goes down otherwise.
 
 ## Versions (same rules as history-explorer-card) — set by the user, not negotiable
 

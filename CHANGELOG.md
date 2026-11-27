@@ -6,6 +6,12 @@ This changelog starts at **v1.3.14** — earlier versions were not tracked, exce
 
 ---
 
+## v1.4.6
+
+### Fixed — a meter's filtered value held above it for good
+
+- **A `total_increasing` source going down in steps left its filtered value behind.** A reset of the meter was a value below half of the source's value before it; any smaller drop was held back, as a dip. A source going down in several steps, each less than half, was never seen as reset: the filtered value stayed at the old total until the meter passed it again. A reset is now Home Assistant's rule for its statistics, a value below 90 % of the one before — and below 90 % of the value published, so that a meter going down in steps is seen as well. A filtered value held above its source this way is freed at the source's next value.
+
 ## v1.4.5
 
 ### Changed — an angle averaged as Home Assistant does
